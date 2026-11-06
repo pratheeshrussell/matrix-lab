@@ -1,0 +1,663 @@
+import JXG from 'jsxgraph'
+import type { Vec2 } from '../domain/math/Vector2'
+import type {
+  EvaluatedCurveGeometry,
+  EvaluatedGeometryItem,
+  EvaluatedLineGeometry,
+  EvaluatedPointGeometry,
+  EvaluatedPolygonGeometry,
+  EvaluatedScene,
+  EvaluatedVectorGeometry,
+} from '../engine/SceneEvaluator'
+import type { EvaluatedVectorField, EvaluatedVectorSample } from '../engine/VectorFieldEvaluator'
+import type { Renderer, WorldBoundingBox } from './Renderer'
+
+const DEFAULT_BOUNDING_BOX: WorldBoundingBox = [-5.5, 5.5, 5.5, -5.5]
+
+interface GeometryRenderStyle {
+  isOriginalInOverlay: boolean
+  isPrimaryTransformed: boolean
+  labelSuffix: string
+}
+
+/**
+ * JSXGraph 2D Coordinate Plane Renderer.
+ * Converts EvaluatedScene mathematical coordinates into JSXGraph SVG primitives.
+ */
+export class JSXGraphRenderer implements Renderer {
+  private board: JXG.Board | null = null
+  private container: HTMLElement | null = null
+  private createdElements: Array<JXG.GeometryElement | JXG.Composition | JXG.GeometryElement[]> = []
+  private defaultBox: WorldBoundingBox = DEFAULT_BOUNDING_BOX
+
+  public initialize(container: HTMLElement, initialBox: WorldBoundingBox = DEFAULT_BOUNDING_BOX): void {
+    this.destroy()
+    this.container = container
+    this.defaultBox = initialBox
+
+    this.board = JXG.JSXGraph.initBoard(container, {
+      boundingbox: [...initialBox],
+      keepaspectratio: true,
+      axis: false,
+      grid: false,
+      showNavigation: false,
+      showCopyright: false,
+      pan: {
+        enabled: true,
+        needShift: false,
+        needTwoFingers: false,
+      },
+      zoom: {
+        wheel: true,
+        needShift: false,
+        min: 0.08,
+        max: 15,
+      },
+      registerEvents: true,
+    })
+
+    this.createCoordinatePlaneAxesAndGrid()
+  }
+
+  private createCoordinatePlaneAxesAndGrid(): void {
+    if (!this.board) return
+
+    this.board.create('grid', [], {
+      strokeColor: '#1e293b',
+      strokeWidth: 1,
+      strokeOpacity: 0.85,
+       fixed: true,
+      highlight: false,
+    })
+
+    // Horizontal X-axis
+    const xAxis = this.board.create(
+      'axis',
+      [
+        [0, 0],
+        [1, 0],
+      ],
+      {
+        name: 'x',
+        withLabel: true,
+        strokeColor: '#475569',
+        strokeWidth: 1.5,
+        highlight: false,
+        label: {
+          position: 'rt',
+          offset: [-15, 14],
+          strokeColor: '#94a3b8',
+          fontSize: 13,
+        },
+        ticks: {
+          strokeColor: '#475569',
+          majorHeight: 8,
+          drawLabels: true,
+          label: {
+            offset: [-4, -14],
+            strokeColor: '#64748b',
+            fontSize: 11,
+          },
+        },
+      },
+    )
+
+    // Vertical Y-axis
+    const yAxis = this.board.create(
+      'axis',
+      [
+        [0, 0],
+        [0, 1],
+      ],
+      {
+        name: 'y',
+        withLabel: true,
+        strokeColor: '#475569',
+        strokeWidth: 1.5,
+        highlight: false,
+        label: {
+          position: 'rt',
+          offset: [12, -10],
+          strokeColor: '#94a3b8',
+          fontSize: 13,
+        },
+        ticks: {
+          strokeColor: '#475569',
+          majorHeight: 8,
+          drawLabels: true,
+          label: {
+            offset: [8, -2],
+            strokeColor: '#64748b',
+            fontSize: 11,
+          },
+        },
+      },
+    )
+
+    void xAxis
+    void yAxis
+  }
+
+  public render(scene: EvaluatedScene): void {
+    if (!this.board) return
+
+    this.board.suspendUpdate()
+    try {
+      this.clearDynamicElements()
+
+      const mode = scene.visualizationMode
+      const showOriginal = mode === 'original' || mode === 'overlay' || mode === 'step-through'
+      const showTransformed =
+        mode === 'transformed' || mode === 'overlay' || mode === 'step-through'
+      const isOverlayComparison = mode === 'overlay' || mode === 'step-through'
+
+      // 1. Eigenvector invariant lines (drawn behind scene objects)
+      if (scene.options.showEigenvectors) {
+        this.renderEigenvectorLines(scene)
+      }
+
+      // 2. Vector fields (drawn behind discrete geometry so shapes/vectors remain crisp)
+      if (showOriginal) {
+        for (const field of scene.originalFields) {
+          if (!field.visible) continue
+          this.renderVectorFieldSamples(field, field.originalSamples, {
+            isOriginalInOverlay: isOverlayComparison,
+            isPrimaryTransformed: false,
+            labelSuffix: '',
+          })
+        }
+      }
+
+      if (showTransformed) {
+        for (const field of scene.transformedFields) {
+          if (!field.visible) continue
+          if (field.singularPushforwardUnavailable && field.transformedSamples.length === 0) {
+            continue
+          }
+          this.renderVectorFieldSamples(field, field.transformedSamples, {
+            isOriginalInOverlay: false,
+            isPrimaryTransformed: true,
+            labelSuffix: "'",
+          })
+        }
+      }
+
+      // 3. Unit square & transformed area parallelogram
+      if (scene.options.showUnitSquare) {
+        this.renderUnitSquareOverlay(scene, showOriginal, showTransformed, isOverlayComparison)
+      }
+
+      // 4. Geometric objects
+      if (showOriginal) {
+        for (const item of scene.originalGeometry) {
+          if (!item.visible) continue
+          this.renderGeometryItem(item, {
+            isOriginalInOverlay: isOverlayComparison,
+            isPrimaryTransformed: false,
+            labelSuffix: '',
+          })
+        }
+      }
+
+      if (showTransformed) {
+        for (const item of scene.transformedGeometry) {
+          if (!item.visible) continue
+          this.renderGeometryItem(item, {
+            isOriginalInOverlay: false,
+            isPrimaryTransformed: true,
+            labelSuffix: isOverlayComparison ? "'" : '',
+          })
+        }
+      }
+
+      // 5. Standard Basis Vectors e1, e2 and transformed Ae1, Ae2
+      if (scene.options.showBasisVectors) {
+        this.renderBasisVectors(scene, showOriginal, showTransformed, isOverlayComparison)
+      }
+    } finally {
+      this.board.unsuspendUpdate()
+    }
+  }
+
+  private renderEigenvectorLines(scene: EvaluatedScene): void {
+    if (!this.board) return
+    const pairs = scene.activeStepAnalysis.eigen.realPairs
+    const eigenColors = ['#f59e0b', '#ec4899']
+
+    pairs.forEach((pair, idx) => {
+      if (!this.board) return
+      const [vx, vy] = pair.eigenvector
+      if (Math.hypot(vx, vy) < 1e-7) return
+
+      const color = eigenColors[idx % eigenColors.length] ?? '#f59e0b'
+      const line = this.board.create(
+        'line',
+        [
+          [0, 0],
+          [vx, vy],
+        ],
+        {
+          strokeColor: color,
+          strokeWidth: 1.5,
+          dash: 3,
+          strokeOpacity: 0.7,
+          fixed: true,
+          highlight: false,
+          withLabel: true,
+          name: `v${idx + 1} (λ=${Number(pair.eigenvalue.toFixed(2))})`,
+          label: {
+            strokeColor: color,
+            fontSize: 11,
+            offset: [8, 8],
+          },
+        },
+      )
+      this.trackElement(line)
+    })
+  }
+
+  private renderUnitSquareOverlay(
+    scene: EvaluatedScene,
+    showOriginal: boolean,
+    showTransformed: boolean,
+    isOverlayComparison: boolean,
+  ): void {
+    if (!this.board) return
+
+    if (showOriginal) {
+      const sq = scene.basisVectors.originalUnitSquare
+      const xs = [...sq.map((p) => p[0]), sq[0][0]]
+      const ys = [...sq.map((p) => p[1]), sq[0][1]]
+      const curve = this.board.create('curve', [xs, ys], {
+        strokeColor: '#94a3b8',
+        strokeWidth: 1.2,
+        dash: 2,
+        strokeOpacity: isOverlayComparison ? 0.45 : 0.75,
+        fillColor: '#94a3b8',
+        fillOpacity: isOverlayComparison ? 0.05 : 0.1,
+        fixed: true,
+        highlight: false,
+      })
+      this.trackElement(curve)
+    }
+
+    if (showTransformed) {
+      const para = scene.basisVectors.transformedUnitParallelogram
+      const xs = [...para.map((p) => p[0]), para[0][0]]
+      const ys = [...para.map((p) => p[1]), para[0][1]]
+      const reversed = scene.activeStepAnalysis.orientation === 'reversed'
+      const fillColor = reversed ? '#f43f5e' : '#10b981'
+
+      const curve = this.board.create('curve', [xs, ys], {
+        strokeColor: fillColor,
+        strokeWidth: 1.5,
+        dash: 1,
+        strokeOpacity: 0.7,
+        fillColor,
+        fillOpacity: 0.12,
+        fixed: true,
+        highlight: false,
+      })
+      this.trackElement(curve)
+    }
+  }
+
+  private renderBasisVectors(
+    scene: EvaluatedScene,
+    showOriginal: boolean,
+    showTransformed: boolean,
+    isOverlayComparison: boolean,
+  ): void {
+    if (!this.board) return
+    const { originalE1, originalE2, transformedE1, transformedE2 } = scene.basisVectors
+
+    if (showOriginal) {
+      this.createVectorArrow([0, 0], originalE1, {
+        color: '#ef4444',
+        width: isOverlayComparison ? 2 : 3,
+        dash: isOverlayComparison ? 2 : 0,
+        opacity: isOverlayComparison ? 0.45 : 0.95,
+        label: 'e₁',
+      })
+      this.createVectorArrow([0, 0], originalE2, {
+        color: '#22c55e',
+        width: isOverlayComparison ? 2 : 3,
+        dash: isOverlayComparison ? 2 : 0,
+        opacity: isOverlayComparison ? 0.45 : 0.95,
+        label: 'e₂',
+      })
+    }
+
+    if (showTransformed) {
+      this.createVectorArrow([0, 0], transformedE1, {
+        color: '#ef4444',
+        width: 3.2,
+        dash: 0,
+        opacity: 1,
+        label: isOverlayComparison ? "A·e₁" : 'e₁',
+      })
+      this.createVectorArrow([0, 0], transformedE2, {
+        color: '#22c55e',
+        width: 3.2,
+        dash: 0,
+        opacity: 1,
+        label: isOverlayComparison ? "A·e₂" : 'e₂',
+      })
+    }
+  }
+
+  private renderVectorFieldSamples(
+    field: EvaluatedVectorField,
+    samples: readonly EvaluatedVectorSample[],
+    style: GeometryRenderStyle,
+  ): void {
+    if (!this.board || samples.length === 0) return
+
+    const xs: number[] = []
+    const ys: number[] = []
+
+    for (const sample of samples) {
+      const [x0, y0] = sample.position
+      const [dx, dy] = sample.displayDelta
+      const len = Math.hypot(dx, dy)
+      if (len < 1e-5) continue
+
+      const x1 = x0 + dx
+      const y1 = y0 + dy
+
+      // Arrow shaft
+      xs.push(x0, x1, Number.NaN)
+      ys.push(y0, y1, Number.NaN)
+
+      // Arrowhead wings
+      const ux = dx / len
+      const uy = dy / len
+      const nx = -uy
+      const ny = ux
+      const headLen = Math.min(len * 0.34, 0.22)
+      const headHalfWidth = headLen * 0.52
+
+      const leftX = x1 - ux * headLen + nx * headHalfWidth
+      const leftY = y1 - uy * headLen + ny * headHalfWidth
+      const rightX = x1 - ux * headLen - nx * headHalfWidth
+      const rightY = y1 - uy * headLen - ny * headHalfWidth
+
+      xs.push(leftX, x1, rightX, Number.NaN)
+      ys.push(leftY, y1, rightY, Number.NaN)
+    }
+
+    if (xs.length === 0) return
+
+    const strokeColor = style.isOriginalInOverlay ? '#64748b' : field.color
+    const strokeOpacity = style.isOriginalInOverlay ? 0.45 : 0.92
+    const strokeWidth = style.isOriginalInOverlay
+      ? Math.max(1.1, field.strokeWidth * 0.75)
+      : field.strokeWidth
+
+    const fieldCurve = this.board.create('curve', [xs, ys], {
+      strokeColor,
+      strokeOpacity,
+      strokeWidth,
+      dash: style.isOriginalInOverlay ? 1 : 0,
+      fixed: true,
+      highlight: false,
+    })
+    this.trackElement(fieldCurve)
+  }
+
+  private renderGeometryItem(item: EvaluatedGeometryItem, style: GeometryRenderStyle): void {
+    switch (item.kind) {
+      case 'point':
+        this.renderPoint(item, style)
+        break
+      case 'vector':
+        this.renderVector(item, style)
+        break
+      case 'line':
+        this.renderLine(item, style)
+        break
+      case 'polygon':
+        this.renderPolygon(item, style)
+        break
+      case 'curve':
+        this.renderCurve(item, style)
+        break
+    }
+  }
+
+  private renderPoint(item: EvaluatedPointGeometry, style: GeometryRenderStyle): void {
+    if (!this.board) return
+    const [x, y] = item.position
+    const color = style.isOriginalInOverlay ? '#94a3b8' : item.color
+    const pt = this.board.create('point', [x, y], {
+      name: `${item.name}${style.labelSuffix}`,
+      size: style.isOriginalInOverlay ? 3 : 4,
+      strokeColor: color,
+      fillColor: color,
+      fillOpacity: style.isOriginalInOverlay ? 0.45 : 1,
+      strokeOpacity: style.isOriginalInOverlay ? 0.45 : 1,
+      fixed: true,
+      highlight: false,
+      label: {
+        strokeColor: color,
+        fontSize: 12,
+        offset: [8, 8],
+      },
+    })
+    this.trackElement(pt)
+  }
+
+  private renderVector(item: EvaluatedVectorGeometry, style: GeometryRenderStyle): void {
+    this.createVectorArrow(item.tail, item.tip, {
+      color: style.isOriginalInOverlay ? '#94a3b8' : item.color,
+      width: style.isOriginalInOverlay ? Math.max(1.5, item.strokeWidth * 0.75) : item.strokeWidth,
+      dash: style.isOriginalInOverlay ? 2 : 0,
+      opacity: style.isOriginalInOverlay ? 0.45 : 0.98,
+      label: `${item.name}${style.labelSuffix}`,
+    })
+  }
+
+  private renderLine(item: EvaluatedLineGeometry, style: GeometryRenderStyle): void {
+    if (!this.board) return
+    const color = style.isOriginalInOverlay ? '#94a3b8' : item.color
+
+    if (item.degeneratePoint) {
+      const pt = this.board.create('point', [item.p1[0], item.p1[1]], {
+        name: `${item.name}${style.labelSuffix} (collapsed)`,
+        size: 3,
+        strokeColor: color,
+        fillColor: color,
+        fixed: true,
+        highlight: false,
+        label: { strokeColor: color, fontSize: 11 },
+      })
+      this.trackElement(pt)
+      return
+    }
+
+    const line = this.board.create('line', [[...item.p1], [...item.p2]], {
+      straightFirst: item.infinite,
+      straightLast: item.infinite,
+      strokeColor: color,
+      strokeWidth: style.isOriginalInOverlay ? 1.5 : item.strokeWidth,
+      strokeOpacity: style.isOriginalInOverlay ? 0.45 : 0.95,
+      dash: style.isOriginalInOverlay ? 2 : 0,
+      fixed: true,
+      highlight: false,
+      withLabel: true,
+      name: `${item.name}${style.labelSuffix}`,
+      label: {
+        strokeColor: color,
+        fontSize: 11,
+        offset: [6, 6],
+      },
+    })
+    this.trackElement(line)
+  }
+
+  private renderPolygon(item: EvaluatedPolygonGeometry, style: GeometryRenderStyle): void {
+    if (!this.board || item.vertices.length === 0) return
+
+    const first = item.vertices[0]
+    if (!first) return
+    const xs = [...item.vertices.map((v) => v[0]), first[0]]
+    const ys = [...item.vertices.map((v) => v[1]), first[1]]
+    const color = style.isOriginalInOverlay ? '#94a3b8' : item.color
+
+    const polyCurve = this.board.create('curve', [xs, ys], {
+      strokeColor: color,
+      strokeWidth: style.isOriginalInOverlay ? 1.6 : item.strokeWidth,
+      strokeOpacity: style.isOriginalInOverlay ? 0.5 : 0.95,
+      dash: style.isOriginalInOverlay ? 2 : 0,
+      fillColor: color,
+      fillOpacity: style.isOriginalInOverlay ? item.fillOpacity * 0.35 : item.fillOpacity,
+      fixed: true,
+      highlight: false,
+    })
+    this.trackElement(polyCurve)
+
+    // Render vertex dots so degeneracies or corners are clear
+    for (const v of item.vertices) {
+      const pt = this.board.create('point', [v[0], v[1]], {
+        withLabel: false,
+        size: style.isOriginalInOverlay ? 1.8 : 2.5,
+        strokeColor: color,
+        fillColor: color,
+        fillOpacity: style.isOriginalInOverlay ? 0.45 : 0.9,
+        strokeOpacity: style.isOriginalInOverlay ? 0.45 : 0.9,
+        fixed: true,
+        highlight: false,
+      })
+      this.trackElement(pt)
+    }
+  }
+
+  private renderCurve(item: EvaluatedCurveGeometry, style: GeometryRenderStyle): void {
+    if (!this.board || item.points.length === 0) return
+
+    const xs = item.points.map((p) => p[0])
+    const ys = item.points.map((p) => p[1])
+    const color = style.isOriginalInOverlay ? '#94a3b8' : item.color
+
+    const curve = this.board.create('curve', [xs, ys], {
+      strokeColor: color,
+      strokeWidth: style.isOriginalInOverlay ? 1.6 : item.strokeWidth,
+      strokeOpacity: style.isOriginalInOverlay ? 0.5 : 0.95,
+      dash: style.isOriginalInOverlay ? 2 : 0,
+      fillColor: item.closed ? color : 'none',
+      fillOpacity: item.closed
+        ? style.isOriginalInOverlay
+          ? item.fillOpacity * 0.35
+          : item.fillOpacity
+        : 0,
+      fixed: true,
+      highlight: false,
+    })
+    this.trackElement(curve)
+  }
+
+  private createVectorArrow(
+    tail: Vec2,
+    tip: Vec2,
+    opts: {
+      color: string
+      width: number
+      dash: number
+      opacity: number
+      label: string
+    },
+  ): void {
+    if (!this.board) return
+    const dx = tip[0] - tail[0]
+    const dy = tip[1] - tail[1]
+    const len = Math.hypot(dx, dy)
+
+    if (len < 1e-6) {
+      const pt = this.board.create('point', [tail[0], tail[1]], {
+        name: `${opts.label} (0,0)`,
+        size: 3,
+        strokeColor: opts.color,
+        fillColor: opts.color,
+        fixed: true,
+        highlight: false,
+        label: { strokeColor: opts.color, fontSize: 11, offset: [6, 6] },
+      })
+      this.trackElement(pt)
+      return
+    }
+
+    const arrow = this.board.create('arrow', [[...tail], [...tip]], {
+      strokeColor: opts.color,
+      strokeWidth: opts.width,
+      strokeOpacity: opts.opacity,
+      dash: opts.dash,
+      fixed: true,
+      highlight: false,
+      withLabel: Boolean(opts.label),
+      name: opts.label,
+      label: {
+        position: 'top',
+        strokeColor: opts.color,
+        fontSize: 12,
+        offset: [6, 6],
+      },
+    })
+    this.trackElement(arrow)
+  }
+
+  private trackElement(
+    el: JXG.GeometryElement | JXG.Composition | JXG.GeometryElement[],
+  ): void {
+    this.createdElements.push(el)
+  }
+
+  private clearDynamicElements(): void {
+    if (!this.board) return
+    for (let i = this.createdElements.length - 1; i >= 0; i--) {
+      const el = this.createdElements[i]
+      if (el) {
+        this.board.removeObject(el as JXG.GeometryElement)
+      }
+    }
+    this.createdElements = []
+  }
+
+  public zoomIn(): void {
+    if (!this.board) return
+    this.board.zoomIn()
+  }
+
+  public zoomOut(): void {
+    if (!this.board) return
+    this.board.zoomOut()
+  }
+
+  public resetView(box: WorldBoundingBox = this.defaultBox): void {
+    if (!this.board) return
+    this.board.setBoundingBox([...box], true)
+  }
+
+  public resize(): void {
+    if (!this.board || !this.container) return
+    const rect = this.container.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      this.board.resizeContainer(rect.width, rect.height)
+    }
+  }
+
+  public clear(): void {
+    if (!this.board) return
+    this.board.suspendUpdate()
+    this.clearDynamicElements()
+    this.board.unsuspendUpdate()
+  }
+
+  public destroy(): void {
+    this.createdElements = []
+    if (this.board) {
+      JXG.JSXGraph.freeBoard(this.board)
+      this.board = null
+    }
+    this.container = null
+  }
+}
