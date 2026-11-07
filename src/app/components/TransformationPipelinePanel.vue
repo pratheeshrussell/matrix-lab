@@ -49,9 +49,20 @@ function handleMatrixEntryInput(
   <aside class="panel pipeline-panel">
     <div class="panel-header">
       <h2>Transformation Pipeline</h2>
-      <span class="count-pill">
-        {{ transformStore.enabledSteps.length }}/{{ transformStore.steps.length }} active
-      </span>
+      <div class="header-right">
+        <span class="count-pill">
+          {{ transformStore.enabledSteps.length }}/{{ transformStore.steps.length }} active
+        </span>
+        <button
+          v-if="transformStore.steps.length > 0"
+          type="button"
+          class="clear-btn"
+          title="Remove all transformation steps (reset to Identity)"
+          @click="transformStore.clearSteps()"
+        >
+          Clear
+        </button>
+      </div>
     </div>
 
     <!-- Add Step Toolbar -->
@@ -381,6 +392,30 @@ function handleMatrixEntryInput(
   border-radius: 999px;
   background: var(--bg-elevated);
   color: var(--text-secondary);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.clear-btn {
+  padding: 0.18rem 0.48rem;
+  border-radius: 5px;
+  border: 1px solid rgba(244, 63, 94, 0.38);
+  background: rgba(244, 63, 94, 0.12);
+  color: #fda4af;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.clear-btn:hover {
+  background: rgba(244, 63, 94, 0.24);
+  border-color: rgba(244, 63, 94, 0.65);
+  color: #ffe4e6;
 }
 
 .add-step-bar {

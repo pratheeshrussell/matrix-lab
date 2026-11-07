@@ -75,7 +75,18 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
   <aside class="panel scene-panel">
     <div class="panel-header">
       <h2>Scene &amp; Fields</h2>
-      <span class="count-pill">{{ sceneStore.objects.length }} items</span>
+      <div class="header-right">
+        <span class="count-pill">{{ sceneStore.objects.length }} items</span>
+        <button
+          v-if="sceneStore.objects.length > 0"
+          type="button"
+          class="clear-btn"
+          title="Remove all geometric objects and vector fields"
+          @click="sceneStore.clearScene()"
+        >
+          Clear All
+        </button>
+      </div>
     </div>
 
     <!-- Quick Add Geometric Objects + Vector Field -->
@@ -108,8 +119,16 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
       <!-- Vector Fields Section (First-Class MVP Feature) -->
       <section class="object-group">
         <div class="group-header">
-          <h3>Vector Fields</h3>
-          <span class="group-count">{{ sceneStore.vectorFields.length }}</span>
+          <h3>Vector Fields ({{ sceneStore.vectorFields.length }})</h3>
+          <button
+            v-if="sceneStore.vectorFields.length > 0"
+            type="button"
+            class="clear-link-btn"
+            title="Clear all vector fields from the canvas"
+            @click="sceneStore.clearVectorFields()"
+          >
+            Clear Field{{ sceneStore.vectorFields.length > 1 ? 's' : '' }}
+          </button>
         </div>
 
         <!-- Global Vector Field Transformation Semantics Selector -->
@@ -348,8 +367,16 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
       <!-- Geometric Objects Section -->
       <section class="object-group">
         <div class="group-header">
-          <h3>Geometric Objects</h3>
-          <span class="group-count">{{ sceneStore.geometricObjects.length }}</span>
+          <h3>Geometric Objects ({{ sceneStore.geometricObjects.length }})</h3>
+          <button
+            v-if="sceneStore.geometricObjects.length > 0"
+            type="button"
+            class="clear-link-btn"
+            title="Clear all geometric shapes and vectors"
+            @click="sceneStore.clearGeometricObjects()"
+          >
+            Clear Shapes
+          </button>
         </div>
 
         <div v-if="sceneStore.geometricObjects.length === 0" class="empty-hint">
@@ -626,6 +653,47 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
   border-radius: 999px;
   background: var(--bg-elevated);
   color: var(--text-secondary);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.clear-btn {
+  padding: 0.18rem 0.48rem;
+  border-radius: 5px;
+  border: 1px solid rgba(244, 63, 94, 0.38);
+  background: rgba(244, 63, 94, 0.12);
+  color: #fda4af;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.clear-btn:hover {
+  background: rgba(244, 63, 94, 0.24);
+  border-color: rgba(244, 63, 94, 0.65);
+  color: #ffe4e6;
+}
+
+.clear-link-btn {
+  padding: 0.14rem 0.42rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.clear-link-btn:hover {
+  border-color: rgba(244, 63, 94, 0.5);
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.1);
 }
 
 .quick-add-section {

@@ -2,9 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { EDUCATIONAL_PRESETS } from '../../engine/educationalPresets'
 import { JSXGraphRenderer } from '../../renderers/JSXGraphRenderer'
+import { useSceneStore } from '../../stores/sceneStore'
 import { useTransformationStore } from '../../stores/transformationStore'
 import KatexMath from './KatexMath.vue'
 
+const sceneStore = useSceneStore()
 const transformStore = useTransformationStore()
 
 const boardContainerRef = ref<HTMLElement | null>(null)
@@ -94,12 +96,30 @@ onBeforeUnmount(() => {
     <!-- JSXGraph Interactive Board -->
     <div ref="boardContainerRef" class="jsxgraph-canvas" />
 
-    <!-- Floating View Controls (Zoom / Reset) -->
+    <!-- Floating View Controls (Zoom / Reset / Clear) -->
     <div class="canvas-controls">
       <button type="button" class="ctrl-btn" title="Zoom In" @click="renderer.zoomIn()">+</button>
       <button type="button" class="ctrl-btn" title="Zoom Out" @click="renderer.zoomOut()">−</button>
       <button type="button" class="ctrl-btn reset-btn" title="Reset View to [-5.5, 5.5]" @click="renderer.resetView()">
         Reset View
+      </button>
+      <button
+        v-if="sceneStore.vectorFields.length > 0"
+        type="button"
+        class="ctrl-btn clear-ctrl-btn"
+        title="Remove vector fields from the canvas"
+        @click="sceneStore.clearVectorFields()"
+      >
+        Clear Field
+      </button>
+      <button
+        v-if="sceneStore.objects.length > 0"
+        type="button"
+        class="ctrl-btn clear-ctrl-btn"
+        title="Clear all objects and fields from the canvas"
+        @click="sceneStore.clearScene()"
+      >
+        Clear All
       </button>
       <button
         v-if="!showExperimentBanner"
@@ -268,6 +288,17 @@ onBeforeUnmount(() => {
 
 .reset-btn {
   font-size: 0.72rem;
+}
+
+.clear-ctrl-btn {
+  font-size: 0.72rem;
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #fda4af;
+}
+
+.clear-ctrl-btn:hover {
+  border-color: #fb7185;
+  background: rgba(244, 63, 94, 0.16);
 }
 
 .canvas-legend {

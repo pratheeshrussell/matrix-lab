@@ -243,6 +243,20 @@ export const useSceneStore = defineStore('scene', () => {
     selectedObjectId.value = null
   }
 
+  function clearVectorFields(): void {
+    objects.value = objects.value.filter((o) => o.category !== 'field')
+    if (selectedObjectId.value && !objects.value.some((o) => o.id === selectedObjectId.value)) {
+      selectedObjectId.value = objects.value[0]?.id ?? null
+    }
+  }
+
+  function clearGeometricObjects(): void {
+    objects.value = objects.value.filter((o) => o.category !== 'geometric')
+    if (selectedObjectId.value && !objects.value.some((o) => o.id === selectedObjectId.value)) {
+      selectedObjectId.value = objects.value[0]?.id ?? null
+    }
+  }
+
   return {
     objects,
     selectedObjectId,
@@ -256,5 +270,7 @@ export const useSceneStore = defineStore('scene', () => {
     applyVectorFieldPreset,
     setSceneObjects,
     clearScene,
+    clearVectorFields,
+    clearGeometricObjects,
   }
 })
