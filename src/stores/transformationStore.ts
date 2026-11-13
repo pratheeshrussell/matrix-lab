@@ -61,6 +61,7 @@ export const useTransformationStore = defineStore('transformation', () => {
   const showUnitSquare = ref<boolean>(defaultPreset.showUnitSquare)
   const showEigenvectors = ref<boolean>(defaultPreset.showEigenvectors)
   const showSvd = ref<boolean>(false)
+  const showSubspaces = ref<boolean>(true)
   const showTransformedGrid = ref<boolean>(true)
   const showStreamlines = ref<boolean>(true)
   const customFlowSeeds = ref<Vec2[]>([])
@@ -81,6 +82,7 @@ export const useTransformationStore = defineStore('transformation', () => {
       showUnitSquare: showUnitSquare.value,
       showEigenvectors: showEigenvectors.value,
       showSvd: showSvd.value,
+      showSubspaces: showSubspaces.value,
       showTransformedGrid: showTransformedGrid.value,
       showStreamlines: showStreamlines.value,
       customFlowSeeds: customFlowSeeds.value,
@@ -379,6 +381,7 @@ export const useTransformationStore = defineStore('transformation', () => {
     showUnitSquare,
     showEigenvectors,
     showSvd,
+    showSubspaces,
     showTransformedGrid,
     showStreamlines,
     customFlowSeeds,

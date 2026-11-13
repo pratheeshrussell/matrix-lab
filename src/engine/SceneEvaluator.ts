@@ -151,6 +151,7 @@ export interface SceneEvaluationOptions {
   showUnitSquare: boolean
   showEigenvectors: boolean
   showSvd?: boolean
+  showSubspaces?: boolean
   showTransformedGrid?: boolean
   showStreamlines?: boolean
   customFlowSeeds?: readonly Vec2[]
@@ -378,6 +379,7 @@ export function evaluateScene(
   }
 
   const showSvd = options.showSvd ?? false
+  const showSubspaces = options.showSubspaces ?? true
   const showTransformedGrid = options.showTransformedGrid ?? true
   const showStreamlines = options.showStreamlines ?? false
   const customFlowSeeds = options.customFlowSeeds ?? []
@@ -422,6 +424,7 @@ export function evaluateScene(
       ...options,
       morphT,
       showSvd,
+      showSubspaces,
       showTransformedGrid,
       showStreamlines,
       customFlowSeeds,

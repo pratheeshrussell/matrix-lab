@@ -43,6 +43,18 @@ export interface SvdAnalysis {
   summary: string
 }
 
+export interface SubspaceAnalysis {
+  columnSpaceKind: 'plane' | 'line' | 'origin'
+  nullSpaceKind: 'origin' | 'line' | 'plane'
+  /** Unit direction vector spanning Col(A) when rank === 1 */
+  columnBasis: Vec2 | null
+  /** Unit direction vector spanning Null(A) when rank === 1 */
+  nullBasis: Vec2 | null
+  columnSpaceLabel: string
+  nullSpaceLabel: string
+  summary: string
+}
+
 export interface MatrixAnalysis {
   matrix: Mat2
   transformedBasisE1: Vec2
@@ -59,6 +71,7 @@ export interface MatrixAnalysis {
   invertibilityExplanation: string
   eigen: EigenAnalysis
   svd: SvdAnalysis
+  subspaces: SubspaceAnalysis
 }
 
 /**
@@ -261,6 +274,54 @@ export function computeSvdMat2(A: Mat2): SvdAnalysis {
 }
 
 /**
+ * Computes Column Space Col(A) and Null Space Null(A) (Kernel) from rank and SVD.
+ */
+export function computeSubspacesMat2(
+  rank: 0 | 1 | 2,
+  svd: SvdAnalysis,
+): SubspaceAnalysis {
+  if (rank === 2) {
+    return {
+      columnSpaceKind: 'plane',
+      nullSpaceKind: 'origin',
+      columnBasis: null,
+      nullBasis: null,
+      columnSpaceLabel: 'ℝ² (full 2D plane)',
+      nullSpaceLabel: '{(0, 0)} (trivial kernel)',
+      summary:
+        'Full rank 2: Col(M) spans all of ℝ², and only (0, 0) maps to zero (Null(M) = {(0, 0)}).',
+    }
+  }
+
+  if (rank === 1) {
+    const colDir = canonicalizeDirection(svd.u1)
+    const nullDir = canonicalizeDirection(svd.v2)
+    const colStr = `(${formatNumber(colDir[0], 3)}, ${formatNumber(colDir[1], 3)})`
+    const nullStr = `(${formatNumber(nullDir[0], 3)}, ${formatNumber(nullDir[1], 3)})`
+    return {
+      columnSpaceKind: 'line',
+      nullSpaceKind: 'line',
+      columnBasis: colDir,
+      nullBasis: nullDir,
+      columnSpaceLabel: `span{${colStr}}`,
+      nullSpaceLabel: `span{${nullStr}}`,
+      summary: `Rank 1 collapse: every input vector lands on Col(M) along ${colStr}, while every vector on Null(M) along ${nullStr} collapses to (0, 0).`,
+    }
+  }
+
+  return {
+    columnSpaceKind: 'origin',
+    nullSpaceKind: 'plane',
+    columnBasis: null,
+    nullBasis: null,
+    columnSpaceLabel: '{(0, 0)} (origin only)',
+    nullSpaceLabel: 'ℝ² (entire plane)',
+    summary:
+      'Rank 0 (zero matrix): every vector in ℝ² lies in Null(M) and collapses to (0, 0).',
+  }
+}
+
+/**
  * Full mathematical analysis of a 2x2 transformation matrix.
  */
 export function analyzeMatrix2(A: Mat2): MatrixAnalysis {
@@ -301,6 +362,7 @@ export function analyzeMatrix2(A: Mat2): MatrixAnalysis {
 
   const eigen = analyzeEigenMat2(A)
   const svd = computeSvdMat2(A)
+  const subspaces = computeSubspacesMat2(rank, svd)
 
   return {
     matrix: A,
@@ -318,5 +380,6 @@ export function analyzeMatrix2(A: Mat2): MatrixAnalysis {
     invertibilityExplanation,
     eigen,
     svd,
+    subspaces,
   }
 }

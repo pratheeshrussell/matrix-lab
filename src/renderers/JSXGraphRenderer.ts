@@ -321,6 +321,11 @@ export class JSXGraphRenderer implements Renderer {
         this.renderEigenvectorLines(scene)
       }
 
+      // 1.2. Fundamental subspaces Col(M) & Null(M) when singular (rank < 2)
+      if (scene.options.showSubspaces && showTransformed) {
+        this.renderSubspaces(scene)
+      }
+
       // 1.5. Vector field streamlines (RK4 integral curves behind arrows)
       if (scene.options.showStreamlines && scene.streamlines.length > 0) {
         this.renderStreamlines(scene.streamlines, showOriginal, showTransformed, isOverlayComparison)
@@ -685,6 +690,90 @@ export class JSXGraphRenderer implements Renderer {
       )
       this.trackElement(line)
     })
+  }
+
+  private renderSubspaces(scene: EvaluatedScene): void {
+    if (!this.board) return
+    const { rank, subspaces } = scene.activeStepAnalysis
+    if (rank === 2) return
+
+    if (rank === 1 && subspaces.nullBasis) {
+      const [nx, ny] = subspaces.nullBasis
+      if (Math.hypot(nx, ny) > 1e-7) {
+        const nullLine = this.board.create(
+          'line',
+          [
+            [0, 0],
+            [nx, ny],
+          ],
+          {
+            strokeColor: '#fb923c',
+            strokeWidth: 2.2,
+            dash: 2,
+            strokeOpacity: 0.88,
+            fixed: true,
+            highlight: false,
+            withLabel: true,
+            name: 'Null(M) → 0',
+            label: {
+              strokeColor: '#fb923c',
+              fontSize: 11,
+              offset: [10, -14],
+            },
+          },
+        )
+        this.trackElement(nullLine)
+      }
+    }
+
+    if (rank === 1 && subspaces.columnBasis) {
+      const [cx, cy] = subspaces.columnBasis
+      if (Math.hypot(cx, cy) > 1e-7) {
+        const colLine = this.board.create(
+          'line',
+          [
+            [0, 0],
+            [cx, cy],
+          ],
+          {
+            strokeColor: '#22d3ee',
+            strokeWidth: 2.8,
+            dash: 0,
+            strokeOpacity: 0.92,
+            fixed: true,
+            highlight: false,
+            withLabel: true,
+            name: 'Col(M)',
+            label: {
+              strokeColor: '#22d3ee',
+              fontSize: 12,
+              offset: [10, 10],
+            },
+          },
+        )
+        this.trackElement(colLine)
+      }
+    }
+
+    // Highlight origin (0, 0) as the collapse target of Null(M)
+    const originTarget = this.board.create('point', [0, 0], {
+      name: rank === 0 ? 'Col(M) = {(0,0)} | Null(M) = ℝ²' : '',
+      withLabel: rank === 0,
+      size: rank === 0 ? 5.5 : 4,
+      face: 'o',
+      strokeColor: '#fb923c',
+      strokeWidth: 2.2,
+      fillColor: '#090d16',
+      fillOpacity: 0.85,
+      fixed: true,
+      highlight: false,
+      label: {
+        strokeColor: '#fb923c',
+        fontSize: 11,
+        offset: [10, 10],
+      },
+    })
+    this.trackElement(originTarget)
   }
 
   private renderUnitSquareOverlay(

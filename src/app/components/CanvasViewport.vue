@@ -432,6 +432,15 @@ onBeforeUnmount(() => {
           <span class="legend-line svd" />
           <span>SVD Ellipse</span>
         </div>
+        <div
+          v-if="transformStore.showSubspaces && transformStore.evaluatedScene.activeStepAnalysis.rank < 2"
+          class="legend-item"
+        >
+          <span class="legend-line col-space" />
+          <span>Col(M)</span>
+          <span class="legend-line null-space" />
+          <span>Null(M)</span>
+        </div>
         <div v-if="transformStore.showBasisVectors" class="legend-item">
           <span class="legend-dot e1" />
           <span><KatexMath tex="\mathbf{e}_1" /></span>
@@ -783,6 +792,14 @@ onBeforeUnmount(() => {
 
 .legend-line.svd {
   border-top: 2px solid #e879f9;
+}
+
+.legend-line.col-space {
+  border-top: 2.5px solid #22d3ee;
+}
+
+.legend-line.null-space {
+  border-top: 2px dashed #fb923c;
 }
 
 .legend-dot {

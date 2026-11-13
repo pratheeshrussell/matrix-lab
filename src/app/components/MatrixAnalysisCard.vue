@@ -116,6 +116,33 @@ function matrixToLatex(m: Mat2): string {
       </div>
     </div>
 
+    <!-- Column Space & Null Space (Kernel) -->
+    <div class="subspaces-section">
+      <div class="svd-header">
+        <strong>Column &amp; Null Space (<KatexMath tex="\text{Col}(M), \text{Null}(M)" />)</strong>
+        <button
+          type="button"
+          class="btn-xs"
+          :class="{ 'subspace-toggle-active': transformStore.showSubspaces }"
+          title="Highlight Col(M) and Null(M) lines on canvas when rank < 2"
+          @click="transformStore.showSubspaces = !transformStore.showSubspaces"
+        >
+          {{ transformStore.showSubspaces ? 'Canvas Overlay On' : 'Canvas Overlay Off' }}
+        </button>
+      </div>
+
+      <div class="subspace-chips">
+        <span class="subspace-pill col-pill">
+          <strong><KatexMath tex="\text{Col}(M)" />:</strong> {{ analysis.subspaces.columnSpaceLabel }}
+        </span>
+        <span class="subspace-pill null-pill">
+          <strong><KatexMath tex="\text{Null}(M)" />:</strong> {{ analysis.subspaces.nullSpaceLabel }}
+        </span>
+      </div>
+
+      <p class="svd-summary">{{ analysis.subspaces.summary }}</p>
+    </div>
+
     <!-- Singular Value Decomposition M = U * Sigma * V^T -->
     <div class="svd-section">
       <div class="svd-header">
@@ -379,5 +406,46 @@ function matrixToLatex(m: Mat2): string {
   align-self: flex-start;
   border-color: rgba(232, 121, 249, 0.45);
   color: #f5d0fe;
+}
+
+.subspaces-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.subspace-toggle-active {
+  border-color: #22d3ee;
+  color: #cffafe;
+  background: rgba(34, 211, 238, 0.14);
+}
+
+.subspace-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.subspace-pill {
+  font-family: var(--font-mono);
+  font-size: 0.69rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border-subtle);
+}
+
+.col-pill {
+  border-color: rgba(34, 211, 238, 0.35);
+  color: #a5f3fc;
+}
+
+.null-pill {
+  border-color: rgba(251, 146, 60, 0.35);
+  color: #fed7aa;
 }
 </style>

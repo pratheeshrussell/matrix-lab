@@ -102,6 +102,14 @@ function handlePresetChange(event: Event): void {
           <input v-model="transformStore.showSvd" type="checkbox" />
           <span>SVD Ellipse</span>
         </label>
+
+        <label
+          class="chip-toggle"
+          title="Highlight Column Space Col(M) and Null Space Null(M) when det(M) = 0"
+        >
+          <input v-model="transformStore.showSubspaces" type="checkbox" />
+          <span>Col / Null</span>
+        </label>
       </div>
 
       <div class="preset-selector">
@@ -264,18 +272,18 @@ function handlePresetChange(event: Event): void {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.3rem;
+  gap: 0.25rem;
 }
 
 .chip-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.28rem;
-  padding: 0.26rem 0.48rem;
+  gap: 0.25rem;
+  padding: 0.24rem 0.42rem;
   border-radius: 6px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
-  font-size: 0.72rem;
+  font-size: 0.71rem;
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
@@ -297,12 +305,12 @@ function handlePresetChange(event: Event): void {
   color: var(--text-primary);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  padding: 0.3rem 0.5rem;
-  font-size: 0.74rem;
-  max-width: 215px;
+  padding: 0.28rem 0.45rem;
+  font-size: 0.73rem;
+  max-width: 185px;
 }
 
-@media (max-width: 1320px) {
+@media (max-width: 1380px) {
   .toolbar-actions {
     width: 100%;
     margin-left: 0;

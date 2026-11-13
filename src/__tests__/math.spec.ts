@@ -123,4 +123,38 @@ describe('Matrix2 and Linear Algebra Engine', () => {
       expect(svd.sigma1 * svd.sigma2).toBeCloseTo(Math.abs(determinantMat2(A)), 6)
     }
   })
+
+  it('computes Column Space and Null Space bases for rank 2, rank 1, and rank 0 matrices', () => {
+    const fullRank = analyzeMatrix2(rotationMatrix(45))
+    expect(fullRank.subspaces.columnSpaceKind).toBe('plane')
+    expect(fullRank.subspaces.nullSpaceKind).toBe('origin')
+    expect(fullRank.subspaces.columnBasis).toBeNull()
+    expect(fullRank.subspaces.nullBasis).toBeNull()
+
+    // Projection onto y = x: Col(M) along (1,1)/sqrt(2), Null(M) along (-1,1)/sqrt(2)
+    const projYX = analyzeMatrix2(projectionMatrix('line-y-eq-x'))
+    expect(projYX.rank).toBe(1)
+    expect(projYX.subspaces.columnSpaceKind).toBe('line')
+    expect(projYX.subspaces.nullSpaceKind).toBe('line')
+    const colVec = projYX.subspaces.columnBasis!
+    const nullVec = projYX.subspaces.nullBasis!
+    expect(colVec).not.toBeNull()
+    expect(nullVec).not.toBeNull()
+    // M * nullVec == (0, 0)
+    expect(approxEqualVec2(multiplyMat2Vec2(projYX.matrix, nullVec), [0, 0], 1e-6)).toBe(true)
+    // Col vector lies on y = x
+    expect(colVec[0]).toBeCloseTo(colVec[1], 6)
+
+    // General non-orthogonal rank-1 matrix [[1, 2], [0.5, 1]]
+    const genRank1 = analyzeMatrix2([1, 2, 0.5, 1])
+    expect(genRank1.rank).toBe(1)
+    expect(approxEqualVec2(multiplyMat2Vec2(genRank1.matrix, genRank1.subspaces.nullBasis!), [0, 0], 1e-6)).toBe(true)
+    const genCol = genRank1.subspaces.columnBasis!
+    expect(genCol[1] / genCol[0]).toBeCloseTo(0.5, 6)
+
+    // Zero matrix: rank 0
+    const zero = analyzeMatrix2([0, 0, 0, 0])
+    expect(zero.subspaces.columnSpaceKind).toBe('origin')
+    expect(zero.subspaces.nullSpaceKind).toBe('plane')
+  })
 })
