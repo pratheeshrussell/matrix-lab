@@ -767,7 +767,9 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
 
 .panel-scroll {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 0.75rem 0.9rem;
   display: flex;
   flex-direction: column;
@@ -778,6 +780,7 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  min-width: 0;
 }
 
 .group-header {
@@ -977,11 +980,13 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
   border-radius: 5px;
   padding: 0.25rem 0.45rem;
   font-size: 0.74rem;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .expr-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.4rem;
 }
 
@@ -989,11 +994,13 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  min-width: 0;
 }
 
 .mono-input,
 .num-input {
   width: 100%;
+  min-width: 0;
   background: var(--bg-canvas);
   color: var(--text-primary);
   border: 1px solid var(--border-subtle);
@@ -1005,19 +1012,20 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
 
 .param-grid-2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.4rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  align-items: end;
 }
 
 .param-grid-3 {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.35rem;
 }
 
 .param-grid-4 {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.35rem;
 }
 
@@ -1027,16 +1035,36 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
   display: flex;
   flex-direction: column;
   gap: 0.18rem;
+  min-width: 0;
   color: var(--text-secondary);
   font-size: 0.7rem;
 }
 
+.num-field input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0.12rem 0 0;
+  accent-color: #2dd4bf;
+  cursor: pointer;
+}
+
+.param-grid-2 label.checkbox-inline,
 .checkbox-inline {
-  display: inline-flex;
+  display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: flex-start;
+  gap: 0.4rem;
+  padding-bottom: 0.12rem;
   color: var(--text-secondary);
   cursor: pointer;
+}
+
+.checkbox-inline input[type='checkbox'] {
+  margin: 0;
+  accent-color: #2dd4bf;
+  flex-shrink: 0;
 }
 
 .vertices-editor {

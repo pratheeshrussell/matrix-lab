@@ -428,6 +428,10 @@ onBeforeUnmount(() => {
           <span class="legend-line warped" />
           <span>Warped Grid</span>
         </div>
+        <div v-if="transformStore.showSvd" class="legend-item">
+          <span class="legend-line svd" />
+          <span>SVD Ellipse</span>
+        </div>
         <div v-if="transformStore.showBasisVectors" class="legend-item">
           <span class="legend-dot e1" />
           <span><KatexMath tex="\mathbf{e}_1" /></span>
@@ -775,6 +779,10 @@ onBeforeUnmount(() => {
 
 .legend-line.warped {
   border-top: 1.5px solid rgba(56, 189, 248, 0.55);
+}
+
+.legend-line.svd {
+  border-top: 2px solid #e879f9;
 }
 
 .legend-dot {

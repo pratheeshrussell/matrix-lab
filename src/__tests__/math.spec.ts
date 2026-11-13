@@ -13,10 +13,11 @@ import {
   scalingMatrix,
   shearMatrix,
   traceMat2,
+  transposeMat2,
   type Mat2,
 } from '../domain/math/Matrix2'
 import { approxEqualVec2, type Vec2 } from '../domain/math/Vector2'
-import { analyzeMatrix2 } from '../engine/MatrixProperties'
+import { analyzeMatrix2, computeSvdMat2 } from '../engine/MatrixProperties'
 
 describe('Matrix2 and Linear Algebra Engine', () => {
   it('multiplies column vectors on the left: v_prime = A * v', () => {
@@ -86,5 +87,40 @@ describe('Matrix2 and Linear Algebra Engine', () => {
     expect(shearAnalysis.eigen.kind).toBe('repeated-real-defective')
     expect(shearAnalysis.eigen.realPairs).toHaveLength(1)
     expect(shearAnalysis.eigen.realPairs[0]?.eigenvalue).toBeCloseTo(1)
+  })
+
+  it('computes accurate SVD A = U * Sigma * V^T across regular, reflected, and singular 2x2 matrices', () => {
+    const testCases: Mat2[] = [
+      IDENTITY_MAT2,
+      rotationMatrix(37),
+      scalingMatrix(1, 3),
+      shearMatrix(1.2, -0.4),
+      reflectionMatrix('custom-angle', 28),
+      [2, 1.5, -0.8, 3.1],
+      [1.5, -2.2, 0.7, 1.1],
+      projectionMatrix('custom-angle', 35),
+      [0, 0, 0, 0],
+    ]
+
+    for (const A of testCases) {
+      const svd = computeSvdMat2(A)
+      expect(svd.sigma1).toBeGreaterThanOrEqual(svd.sigma2 - 1e-12)
+      expect(svd.sigma2).toBeGreaterThanOrEqual(0)
+
+      // Orthonormality of U and V^T
+      expect(approxEqualMat2(multiplyMat2(transposeMat2(svd.u), svd.u), IDENTITY_MAT2, 1e-6)).toBe(
+        true,
+      )
+      expect(approxEqualMat2(multiplyMat2(transposeMat2(svd.vT), svd.vT), IDENTITY_MAT2, 1e-6)).toBe(
+        true,
+      )
+
+      // Reconstruction U * Sigma * V^T == A
+      const reconstructed = multiplyMat2(svd.u, multiplyMat2(svd.sigma, svd.vT))
+      expect(approxEqualMat2(reconstructed, A, 1e-6)).toBe(true)
+
+      // Singular values product equals |det(A)|
+      expect(svd.sigma1 * svd.sigma2).toBeCloseTo(Math.abs(determinantMat2(A)), 6)
+    }
   })
 })

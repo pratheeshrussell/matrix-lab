@@ -4,6 +4,8 @@ import {
   determinantMat2,
   formatNumber,
   inverseMat2,
+  mat2,
+  multiplyMat2Vec2,
   traceMat2,
   type Mat2,
 } from '../domain/math/Matrix2'
@@ -24,6 +26,23 @@ export interface EigenAnalysis {
   summary: string
 }
 
+export interface SvdAnalysis {
+  u: Mat2
+  sigma: Mat2
+  vT: Mat2
+  sigma1: number
+  sigma2: number
+  conditionNumber: number | null
+  v1: Vec2
+  v2: Vec2
+  u1: Vec2
+  u2: Vec2
+  thetaVDeg: number
+  uIsReflection: boolean
+  uAngleDeg: number
+  summary: string
+}
+
 export interface MatrixAnalysis {
   matrix: Mat2
   transformedBasisE1: Vec2
@@ -39,6 +58,7 @@ export interface MatrixAnalysis {
   inverse: Mat2 | null
   invertibilityExplanation: string
   eigen: EigenAnalysis
+  svd: SvdAnalysis
 }
 
 /**
@@ -159,6 +179,88 @@ function canonicalizeDirection(v: Vec2): Vec2 {
 }
 
 /**
+ * Computes the Singular Value Decomposition A = U * Sigma * V^T for any real 2x2 matrix.
+ * V is always chosen as a proper rotation (det(V) = +1), Sigma has sigma1 >= sigma2 >= 0,
+ * and U is a rotation (det(U) = +1) when det(A) >= 0 or a reflection (det(U) = -1) when det(A) < 0.
+ */
+export function computeSvdMat2(A: Mat2): SvdAnalysis {
+  const [a, b, c, d] = A
+  const g00 = a * a + c * c
+  const g01 = a * b + c * d
+  const g11 = b * b + d * d
+
+  const halfSum = 0.5 * (g00 + g11)
+  const halfDiff = 0.5 * (g00 - g11)
+  const radius = Math.hypot(halfDiff, g01)
+
+  const sigma1 = cleanZero(Math.sqrt(Math.max(0, halfSum + radius)))
+  const det = determinantMat2(A)
+  const sigma2 = sigma1 > 1e-12 ? cleanZero(Math.abs(det) / sigma1) : 0
+  const conditionNumber = sigma2 > 1e-9 ? cleanZero(sigma1 / sigma2) : null
+
+  const thetaVRad =
+    Math.abs(g01) <= 1e-14 && Math.abs(g00 - g11) <= 1e-14
+      ? 0
+      : 0.5 * Math.atan2(2 * g01, g00 - g11)
+  const thetaVDeg = cleanZero((thetaVRad * 180) / Math.PI)
+
+  const cv = Math.cos(thetaVRad)
+  const sv = Math.sin(thetaVRad)
+  const v1: Vec2 = [cleanZero(cv), cleanZero(sv)]
+  const v2: Vec2 = [cleanZero(-sv), cleanZero(cv)]
+  const vT = mat2(v1[0], v1[1], v2[0], v2[1])
+  const sigma = mat2(sigma1, 0, 0, sigma2)
+
+  let u1: Vec2 = [1, 0]
+  let u2: Vec2 = [0, 1]
+  let uIsReflection = false
+  let uAngleDeg = 0
+
+  if (sigma1 > 1e-12) {
+    const av1 = multiplyMat2Vec2(A, v1)
+    const normalizedU1 = normalizeVec2(av1)
+    u1 = [cleanZero(normalizedU1[0]), cleanZero(normalizedU1[1])]
+    uIsReflection = sigma2 > 1e-12 && det < 0
+    u2 = uIsReflection
+      ? [cleanZero(u1[1]), cleanZero(-u1[0])]
+      : [cleanZero(-u1[1]), cleanZero(u1[0])]
+    uAngleDeg = uIsReflection
+      ? cleanZero((0.5 * Math.atan2(u1[1], u1[0]) * 180) / Math.PI)
+      : cleanZero((Math.atan2(u1[1], u1[0]) * 180) / Math.PI)
+  }
+
+  const u = mat2(u1[0], u2[0], u1[1], u2[1])
+
+  let summary = ''
+  if (sigma1 <= 1e-9) {
+    summary = 'Zero matrix: σ₁ = σ₂ = 0; unit circle collapses to the origin.'
+  } else if (sigma2 <= 1e-9) {
+    summary = `Rank-1 collapse: max stretch σ₁ = ${formatNumber(sigma1, 3)}, min stretch σ₂ = 0 (unit circle squashes onto a line along (${formatNumber(u1[0])}, ${formatNumber(u1[1])})).`
+  } else if (Math.abs(sigma1 - sigma2) <= 1e-6) {
+    summary = `Isotropic map: uniform scaling σ₁ = σ₂ = ${formatNumber(sigma1, 3)} (κ = 1); unit circle scales to a circle of radius ${formatNumber(sigma1, 3)}.`
+  } else {
+    summary = `Unit circle maps to an ellipse with semi-axes σ₁ = ${formatNumber(sigma1, 3)} and σ₂ = ${formatNumber(sigma2, 3)} (condition κ = ${formatNumber(conditionNumber ?? 0, 2)}).`
+  }
+
+  return {
+    u,
+    sigma,
+    vT,
+    sigma1,
+    sigma2,
+    conditionNumber,
+    v1,
+    v2,
+    u1,
+    u2,
+    thetaVDeg,
+    uIsReflection,
+    uAngleDeg,
+    summary,
+  }
+}
+
+/**
  * Full mathematical analysis of a 2x2 transformation matrix.
  */
 export function analyzeMatrix2(A: Mat2): MatrixAnalysis {
@@ -198,6 +300,7 @@ export function analyzeMatrix2(A: Mat2): MatrixAnalysis {
     : 'Singular (det = 0): No inverse matrix A⁻¹ exists because multiple input points collapse onto the same output point.'
 
   const eigen = analyzeEigenMat2(A)
+  const svd = computeSvdMat2(A)
 
   return {
     matrix: A,
@@ -214,5 +317,6 @@ export function analyzeMatrix2(A: Mat2): MatrixAnalysis {
     inverse,
     invertibilityExplanation,
     eigen,
+    svd,
   }
 }

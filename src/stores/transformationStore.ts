@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import {
   IDENTITY_MAT2,
   composePipeline,
+  formatNumber,
   inverseMat2,
   mat2,
   multiplyMat2,
@@ -19,6 +20,7 @@ import {
   type VisualizationMode,
 } from '../domain/math/Transform'
 import { EDUCATIONAL_PRESETS } from '../engine/educationalPresets'
+import { analyzeMatrix2 } from '../engine/MatrixProperties'
 import { evaluateScene, type EvaluatedScene } from '../engine/SceneEvaluator'
 import { useSceneStore } from './sceneStore'
 
@@ -58,6 +60,7 @@ export const useTransformationStore = defineStore('transformation', () => {
   const showBasisVectors = ref<boolean>(defaultPreset.showBasisVectors)
   const showUnitSquare = ref<boolean>(defaultPreset.showUnitSquare)
   const showEigenvectors = ref<boolean>(defaultPreset.showEigenvectors)
+  const showSvd = ref<boolean>(false)
   const showTransformedGrid = ref<boolean>(true)
   const showStreamlines = ref<boolean>(true)
   const customFlowSeeds = ref<Vec2[]>([])
@@ -77,6 +80,7 @@ export const useTransformationStore = defineStore('transformation', () => {
       showBasisVectors: showBasisVectors.value,
       showUnitSquare: showUnitSquare.value,
       showEigenvectors: showEigenvectors.value,
+      showSvd: showSvd.value,
       showTransformedGrid: showTransformedGrid.value,
       showStreamlines: showStreamlines.value,
       customFlowSeeds: customFlowSeeds.value,
@@ -197,6 +201,65 @@ export const useTransformationStore = defineStore('transformation', () => {
     return true
   }
 
+  /**
+   * Expands the current composite matrix M into 3 SVD pipeline steps
+   * executed in order V^T -> Sigma -> U so that U * Sigma * V^T = M.
+   */
+  function decomposePipelineToSvd(): void {
+    const composite = evaluatedScene.value.fullCompositeMatrix
+    const { svd } = analyzeMatrix2(composite)
+
+    const vtParams = defaultStepParams()
+    vtParams.angleDeg = Number((-svd.thetaVDeg).toFixed(2))
+    const stepVT: TransformationStep = {
+      id: nextStepId(),
+      dimension: '2d-linear',
+      name: `SVD Vᵀ (Rotate ${formatNumber(-svd.thetaVDeg, 1)}°)`,
+      type: 'rotation',
+      enabled: true,
+      params: vtParams,
+      matrix: svd.vT,
+    }
+
+    const sigmaParams = defaultStepParams()
+    sigmaParams.sx = Number(svd.sigma1.toFixed(3))
+    sigmaParams.sy = Number(svd.sigma2.toFixed(3))
+    const stepSigma: TransformationStep = {
+      id: nextStepId(),
+      dimension: '2d-linear',
+      name: `SVD Σ (Scale ${formatNumber(svd.sigma1, 2)}, ${formatNumber(svd.sigma2, 2)})`,
+      type: 'scaling',
+      enabled: true,
+      params: sigmaParams,
+      matrix: svd.sigma,
+    }
+
+    const uParams = defaultStepParams()
+    uParams.angleDeg = Number(svd.uAngleDeg.toFixed(2))
+    if (svd.uIsReflection) {
+      uParams.reflectionKind = 'custom-angle'
+    }
+    const stepU: TransformationStep = {
+      id: nextStepId(),
+      dimension: '2d-linear',
+      name: svd.uIsReflection
+        ? `SVD U (Reflect ${formatNumber(svd.uAngleDeg, 1)}°)`
+        : `SVD U (Rotate ${formatNumber(svd.uAngleDeg, 1)}°)`,
+      type: svd.uIsReflection ? 'reflection' : 'rotation',
+      enabled: true,
+      params: uParams,
+      matrix: svd.u,
+    }
+
+    steps.value = [stepVT, stepSigma, stepU]
+    activeStepIndex.value = 3
+    morphT.value = 1
+    showSvd.value = true
+    if (visualizationMode.value === 'original') {
+      visualizationMode.value = 'overlay'
+    }
+  }
+
   function clearSteps(): void {
     steps.value = []
     activeStepIndex.value = 0
@@ -315,6 +378,7 @@ export const useTransformationStore = defineStore('transformation', () => {
     showBasisVectors,
     showUnitSquare,
     showEigenvectors,
+    showSvd,
     showTransformedGrid,
     showStreamlines,
     customFlowSeeds,
@@ -330,6 +394,7 @@ export const useTransformationStore = defineStore('transformation', () => {
     duplicateStep,
     removeStep,
     appendCompositeInverseStep,
+    decomposePipelineToSvd,
     clearSteps,
     setMorphT,
     setActiveStepIndex,

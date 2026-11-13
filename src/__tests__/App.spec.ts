@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { approxEqualMat2 } from '../domain/math/Matrix2'
 import { useSceneStore } from '../stores/sceneStore'
 import { useTransformationStore } from '../stores/transformationStore'
 
@@ -65,5 +66,22 @@ describe('Matrix-Lab Stores Integration', () => {
     sceneStore.updateVectorTip(vec.id, [2.5, 4])
     expect(vec.type === 'vector' && vec.dx).toBe(2.5)
     expect(vec.type === 'vector' && vec.dy).toBe(4)
+  })
+
+  it('decomposes composite pipeline into 3 SVD steps (V^T -> Sigma -> U) preserving M and builds SVD geometry', () => {
+    const transformStore = useTransformationStore()
+    const beforeMatrix = [...transformStore.evaluatedScene.fullCompositeMatrix] as const
+
+    transformStore.decomposePipelineToSvd()
+    expect(transformStore.steps).toHaveLength(3)
+    expect(transformStore.showSvd).toBe(true)
+
+    const afterMatrix = transformStore.evaluatedScene.fullCompositeMatrix
+    expect(approxEqualMat2(afterMatrix, beforeMatrix, 1e-6)).toBe(true)
+
+    const svdGeom = transformStore.evaluatedScene.svdGeometry
+    expect(svdGeom.enabled).toBe(true)
+    expect(svdGeom.unitCirclePoints.length).toBeGreaterThan(30)
+    expect(svdGeom.transformedEllipsePoints.length).toBe(svdGeom.unitCirclePoints.length)
   })
 })

@@ -129,6 +129,16 @@ export interface EvaluatedGridLine {
   p2: Vec2
 }
 
+export interface EvaluatedSvdGeometry {
+  enabled: boolean
+  unitCirclePoints: Vec2[]
+  transformedEllipsePoints: Vec2[]
+  v1: Vec2
+  v2: Vec2
+  scaledU1: Vec2
+  scaledU2: Vec2
+}
+
 export interface SceneEvaluationOptions {
   visualizationMode: VisualizationMode
   /** For 'step-through' mode: 0 = original scene, k = after k-th enabled step */
@@ -140,6 +150,7 @@ export interface SceneEvaluationOptions {
   showBasisVectors: boolean
   showUnitSquare: boolean
   showEigenvectors: boolean
+  showSvd?: boolean
   showTransformedGrid?: boolean
   showStreamlines?: boolean
   customFlowSeeds?: readonly Vec2[]
@@ -165,6 +176,7 @@ export interface EvaluatedScene {
   streamlines: EvaluatedStreamlines[]
   basisVectors: EvaluatedBasisVectors
   transformedGridLines: EvaluatedGridLine[]
+  svdGeometry: EvaluatedSvdGeometry
   options: SceneEvaluationOptions
 }
 
@@ -365,9 +377,12 @@ export function evaluateScene(
     ],
   }
 
+  const showSvd = options.showSvd ?? false
   const showTransformedGrid = options.showTransformedGrid ?? true
   const showStreamlines = options.showStreamlines ?? false
   const customFlowSeeds = options.customFlowSeeds ?? []
+
+  const svdGeometry = buildSvdGeometry(showSvd, activeCompositeMatrix, activeStepAnalysis)
 
   const transformedGridLines = showTransformedGrid
     ? buildTransformedGridLines(activeCompositeMatrix)
@@ -402,13 +417,53 @@ export function evaluateScene(
     streamlines,
     basisVectors,
     transformedGridLines,
+    svdGeometry,
     options: {
       ...options,
       morphT,
+      showSvd,
       showTransformedGrid,
       showStreamlines,
       customFlowSeeds,
     },
+  }
+}
+
+function buildSvdGeometry(
+  enabled: boolean,
+  activeMatrix: Mat2,
+  analysis: MatrixAnalysis,
+): EvaluatedSvdGeometry {
+  const { svd } = analysis
+  if (!enabled) {
+    return {
+      enabled: false,
+      unitCirclePoints: [],
+      transformedEllipsePoints: [],
+      v1: svd.v1,
+      v2: svd.v2,
+      scaledU1: [svd.sigma1 * svd.u1[0], svd.sigma1 * svd.u1[1]],
+      scaledU2: [svd.sigma2 * svd.u2[0], svd.sigma2 * svd.u2[1]],
+    }
+  }
+
+  const unitCirclePoints: Vec2[] = []
+  const transformedEllipsePoints: Vec2[] = []
+  for (let i = 0; i <= CIRCLE_SAMPLE_COUNT; i++) {
+    const theta = (2 * Math.PI * i) / CIRCLE_SAMPLE_COUNT
+    const unitPt: Vec2 = [Math.cos(theta), Math.sin(theta)]
+    unitCirclePoints.push(unitPt)
+    transformedEllipsePoints.push(multiplyMat2Vec2(activeMatrix, unitPt))
+  }
+
+  return {
+    enabled: true,
+    unitCirclePoints,
+    transformedEllipsePoints,
+    v1: svd.v1,
+    v2: svd.v2,
+    scaledU1: [svd.sigma1 * svd.u1[0], svd.sigma1 * svd.u1[1]],
+    scaledU2: [svd.sigma2 * svd.u2[0], svd.sigma2 * svd.u2[1]],
   }
 }
 

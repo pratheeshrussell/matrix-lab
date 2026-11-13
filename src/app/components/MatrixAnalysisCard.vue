@@ -115,6 +115,53 @@ function matrixToLatex(m: Mat2): string {
         <strong>Eigenvalues &amp; Invariant Directions:</strong> {{ analysis.eigen.summary }}
       </div>
     </div>
+
+    <!-- Singular Value Decomposition M = U * Sigma * V^T -->
+    <div class="svd-section">
+      <div class="svd-header">
+        <strong>SVD (<KatexMath tex="M = U\Sigma V^T" />)</strong>
+        <button
+          type="button"
+          class="btn-xs"
+          :class="{ 'svd-toggle-active': transformStore.showSvd }"
+          title="Toggle unit circle → ellipse and singular vectors on the canvas"
+          @click="transformStore.showSvd = !transformStore.showSvd"
+        >
+          {{ transformStore.showSvd ? 'Hide Canvas Ellipse' : 'Show Canvas Ellipse' }}
+        </button>
+      </div>
+
+      <div class="svd-metrics">
+        <span class="svd-pill">
+          <KatexMath tex="\sigma_1" /> = {{ formatNumber(analysis.svd.sigma1, 3) }}
+        </span>
+        <span class="svd-pill">
+          <KatexMath tex="\sigma_2" /> = {{ formatNumber(analysis.svd.sigma2, 3) }}
+        </span>
+        <span class="svd-pill">
+          <KatexMath tex="\kappa" /> =
+          {{ analysis.svd.conditionNumber !== null ? formatNumber(analysis.svd.conditionNumber, 2) : '∞' }}
+        </span>
+      </div>
+
+      <p class="svd-summary">{{ analysis.svd.summary }}</p>
+
+      <div class="svd-matrices">
+        <KatexMath
+          :tex="`U = ${matrixToLatex(analysis.svd.u)},\\; \\Sigma = ${matrixToLatex(analysis.svd.sigma)},\\; V^T = ${matrixToLatex(analysis.svd.vT)}`"
+          :display-mode="true"
+        />
+      </div>
+
+      <button
+        type="button"
+        class="btn-xs svd-expand-btn"
+        title="Replace current pipeline with 3 explicit SVD steps: Vᵀ (Rotate) → Σ (Scale) → U (Rotate/Reflect)"
+        @click="transformStore.decomposePipelineToSvd()"
+      >
+        Convert Pipeline to 3 SVD Steps (<KatexMath tex="V^T \to \Sigma \to U" />)
+      </button>
+    </div>
   </section>
 </template>
 
@@ -265,5 +312,72 @@ function matrixToLatex(m: Mat2): string {
   padding: 0.35rem 0.45rem;
   background: rgba(15, 23, 42, 0.5);
   border-radius: 5px;
+}
+
+.svd-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.svd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.svd-header strong {
+  color: var(--text-primary);
+}
+
+.svd-toggle-active {
+  border-color: #e879f9;
+  color: #f5d0fe;
+  background: rgba(232, 121, 249, 0.14);
+}
+
+.svd-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.svd-pill {
+  font-family: var(--font-mono);
+  font-size: 0.69rem;
+  padding: 0.14rem 0.42rem;
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border-subtle);
+  color: #f5d0fe;
+}
+
+.svd-summary {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.svd-matrices {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+  overflow-x: auto;
+}
+
+.svd-matrices :deep(.katex-display) {
+  margin: 0.2rem 0;
+  font-size: 0.86em;
+}
+
+.svd-expand-btn {
+  align-self: flex-start;
+  border-color: rgba(232, 121, 249, 0.45);
+  color: #f5d0fe;
 }
 </style>

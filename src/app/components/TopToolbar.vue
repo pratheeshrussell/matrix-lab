@@ -94,6 +94,14 @@ function handlePresetChange(event: Event): void {
           <input v-model="transformStore.showEigenvectors" type="checkbox" />
           <span>Eigenvectors</span>
         </label>
+
+        <label
+          class="chip-toggle"
+          title="Visualize SVD geometry: unit circle → ellipse and singular vectors (v₁,v₂ → σ₁u₁,σ₂u₂)"
+        >
+          <input v-model="transformStore.showSvd" type="checkbox" />
+          <span>SVD Ellipse</span>
+        </label>
       </div>
 
       <div class="preset-selector">
@@ -164,9 +172,9 @@ function handlePresetChange(event: Event): void {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem 1rem;
-  padding: 0.6rem 1rem;
+  justify-content: flex-start;
+  gap: 0.55rem 0.9rem;
+  padding: 0.5rem 0.85rem;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-subtle);
   z-index: 10;
@@ -175,20 +183,22 @@ function handlePresetChange(event: Event): void {
 .brand-cluster {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.55rem;
+  flex-shrink: 0;
 }
 
 .brand-logo {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.2rem;
-  height: 2.2rem;
+  width: 2rem;
+  height: 2rem;
   border-radius: 8px;
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.2));
   border: 1px solid rgba(56, 189, 248, 0.4);
   font-family: var(--font-mono);
   font-weight: 700;
+  font-size: 0.85rem;
   color: var(--accent-cyan);
 }
 
@@ -198,7 +208,7 @@ function handlePresetChange(event: Event): void {
 
 .brand-title {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
@@ -206,14 +216,15 @@ function handlePresetChange(event: Event): void {
 
 .brand-subtitle {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--text-muted);
 }
 
 .mode-switcher {
   display: inline-flex;
+  flex-shrink: 0;
   background: var(--bg-elevated);
-  padding: 0.2rem;
+  padding: 0.18rem;
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
 }
@@ -222,11 +233,12 @@ function handlePresetChange(event: Event): void {
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 600;
-  padding: 0.38rem 0.8rem;
+  padding: 0.32rem 0.65rem;
   border-radius: 6px;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.15s ease;
 }
 
@@ -243,28 +255,31 @@ function handlePresetChange(event: Event): void {
 .toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .toggle-group {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  flex-wrap: wrap;
+  gap: 0.3rem;
 }
 
 .chip-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.6rem;
+  gap: 0.28rem;
+  padding: 0.26rem 0.48rem;
   border-radius: 6px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 }
 
 .chip-toggle:hover {
@@ -282,9 +297,19 @@ function handlePresetChange(event: Event): void {
   color: var(--text-primary);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  padding: 0.35rem 0.6rem;
-  font-size: 0.78rem;
-  max-width: 280px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.74rem;
+  max-width: 215px;
+}
+
+@media (max-width: 1320px) {
+  .toolbar-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+    padding-top: 0.45rem;
+    border-top: 1px solid var(--border-subtle);
+  }
 }
 
 .step-through-bar {

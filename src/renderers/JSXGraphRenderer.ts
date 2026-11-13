@@ -357,6 +357,11 @@ export class JSXGraphRenderer implements Renderer {
         this.renderUnitSquareOverlay(scene, showOriginal, showTransformed, isOverlayComparison)
       }
 
+      // 3.5. SVD unit circle -> ellipse & singular vectors (v1, v2 -> sigma1*u1, sigma2*u2)
+      if (scene.svdGeometry.enabled) {
+        this.renderSvdGeometry(scene, showOriginal, showTransformed, isOverlayComparison)
+      }
+
       // 4. Geometric objects
       if (showOriginal) {
         for (const item of scene.originalGeometry) {
@@ -725,6 +730,81 @@ export class JSXGraphRenderer implements Renderer {
         highlight: false,
       })
       this.trackElement(curve)
+    }
+  }
+
+  private renderSvdGeometry(
+    scene: EvaluatedScene,
+    showOriginal: boolean,
+    showTransformed: boolean,
+    isOverlayComparison: boolean,
+  ): void {
+    if (!this.board) return
+    const svdGeom = scene.svdGeometry
+
+    if (showOriginal && svdGeom.unitCirclePoints.length > 0) {
+      const xs = svdGeom.unitCirclePoints.map((p) => p[0])
+      const ys = svdGeom.unitCirclePoints.map((p) => p[1])
+      const circle = this.board.create('curve', [xs, ys], {
+        strokeColor: '#a78bfa',
+        strokeWidth: 1.6,
+        dash: isOverlayComparison ? 2 : 0,
+        strokeOpacity: isOverlayComparison ? 0.55 : 0.85,
+        fillColor: '#a78bfa',
+        fillOpacity: isOverlayComparison ? 0.03 : 0.06,
+        fixed: true,
+        highlight: false,
+      })
+      this.trackElement(circle)
+
+      this.createVectorArrow([0, 0], svdGeom.v1, {
+        color: '#a78bfa',
+        width: 2,
+        dash: isOverlayComparison ? 2 : 0,
+        opacity: isOverlayComparison ? 0.72 : 0.95,
+        label: 'v₁',
+      })
+      this.createVectorArrow([0, 0], svdGeom.v2, {
+        color: '#c084fc',
+        width: 2,
+        dash: isOverlayComparison ? 2 : 0,
+        opacity: isOverlayComparison ? 0.65 : 0.9,
+        label: 'v₂',
+      })
+    }
+
+    if (showTransformed && svdGeom.transformedEllipsePoints.length > 0) {
+      const xs = svdGeom.transformedEllipsePoints.map((p) => p[0])
+      const ys = svdGeom.transformedEllipsePoints.map((p) => p[1])
+      const ellipse = this.board.create('curve', [xs, ys], {
+        strokeColor: '#e879f9',
+        strokeWidth: 2,
+        strokeOpacity: 0.92,
+        fillColor: '#e879f9',
+        fillOpacity: 0.07,
+        fixed: true,
+        highlight: false,
+      })
+      this.trackElement(ellipse)
+
+      if (Math.hypot(svdGeom.scaledU1[0], svdGeom.scaledU1[1]) > 1e-4) {
+        this.createVectorArrow([0, 0], svdGeom.scaledU1, {
+          color: '#e879f9',
+          width: 2.6,
+          dash: 0,
+          opacity: 0.96,
+          label: 'σ₁u₁',
+        })
+      }
+      if (Math.hypot(svdGeom.scaledU2[0], svdGeom.scaledU2[1]) > 1e-4) {
+        this.createVectorArrow([0, 0], svdGeom.scaledU2, {
+          color: '#f472b6',
+          width: 2.2,
+          dash: 0,
+          opacity: 0.9,
+          label: 'σ₂u₂',
+        })
+      }
     }
   }
 
