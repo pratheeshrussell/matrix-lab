@@ -1,5 +1,6 @@
 import JXG from 'jsxgraph'
 import type { Vec2 } from '../domain/math/Vector2'
+import type { EvaluatedStreamlines, FlowRenderBatch } from '../engine/FlowSimulation'
 import type {
   EvaluatedCurveGeometry,
   EvaluatedGeometryItem,
@@ -50,6 +51,21 @@ export class JSXGraphRenderer implements Renderer {
   private callbacks: RendererInteractionCallbacks = {}
   private defaultBox: WorldBoundingBox = DEFAULT_BOUNDING_BOX
   private shiftHeld = false
+  private seedPlacementMode = false
+
+  private flowOrigTrailCurve: JXG.Curve | null = null
+  private flowOrigHeadCurve: JXG.Curve | null = null
+  private flowTransTrailCurve: JXG.Curve | null = null
+  private flowTransHeadCurve: JXG.Curve | null = null
+
+  private flowOrigTrailX: number[] = []
+  private flowOrigTrailY: number[] = []
+  private flowOrigHeadX: number[] = []
+  private flowOrigHeadY: number[] = []
+  private flowTransTrailX: number[] = []
+  private flowTransTrailY: number[] = []
+  private flowTransHeadX: number[] = []
+  private flowTransHeadY: number[] = []
 
   private readonly handleKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Shift') this.shiftHeld = true
@@ -57,6 +73,49 @@ export class JSXGraphRenderer implements Renderer {
 
   private readonly handleKeyUp = (e: KeyboardEvent): void => {
     if (e.key === 'Shift') this.shiftHeld = false
+  }
+
+  private isNearInteractiveHandle(ux: number, uy: number, radiusPx = 16): boolean {
+    if (!this.board || !Number.isFinite(ux) || !Number.isFinite(uy)) return false
+    const unitX = Math.abs(this.board.unitX || 1)
+    const unitY = Math.abs(this.board.unitY || 1)
+    for (const entry of this.interactiveHandles.values()) {
+      const dxPx = (ux - entry.point.X()) * unitX
+      const dyPx = (uy - entry.point.Y()) * unitY
+      if (Math.hypot(dxPx, dyPx) <= radiusPx) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private readonly handleCanvasDoubleClick = (e: MouseEvent): void => {
+    if (!this.board || !this.callbacks.onCanvasSeedClick) return
+    const coords = this.board.getUsrCoordsOfMouse(e)
+    if (
+      Number.isFinite(coords[0]) &&
+      Number.isFinite(coords[1]) &&
+      !this.isNearInteractiveHandle(coords[0], coords[1])
+    ) {
+      this.callbacks.onCanvasSeedClick([coords[0], coords[1]], false)
+    }
+  }
+
+  private readonly handleCanvasPointerDown = (e: PointerEvent): void => {
+    if (!this.seedPlacementMode || !this.board || !this.callbacks.onCanvasSeedClick) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+
+    const coords = this.board.getUsrCoordsOfMouse(e)
+    if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return
+
+    // Never block dragging an interactive handle even when seed placement mode is armed
+    if (this.isNearInteractiveHandle(coords[0], coords[1])) {
+      return
+    }
+
+    e.stopPropagation()
+    e.preventDefault()
+    this.callbacks.onCanvasSeedClick([coords[0], coords[1]], e.shiftKey)
   }
 
   public initialize(
@@ -71,6 +130,8 @@ export class JSXGraphRenderer implements Renderer {
 
     window.addEventListener('keydown', this.handleKeyDown)
     window.addEventListener('keyup', this.handleKeyUp)
+    container.addEventListener('dblclick', this.handleCanvasDoubleClick)
+    container.addEventListener('pointerdown', this.handleCanvasPointerDown, true)
 
     this.board = JXG.JSXGraph.initBoard(container, {
       boundingbox: [...initialBox],
@@ -94,6 +155,68 @@ export class JSXGraphRenderer implements Renderer {
     })
 
     this.createCoordinatePlaneAxesAndGrid()
+    this.createFlowParticleLayers()
+  }
+
+  private createFlowParticleLayers(): void {
+    if (!this.board) return
+
+    const bindCurve = (
+      getXs: () => number[],
+      getYs: () => number[],
+      attrs: JXG.CurveAttributes,
+    ): JXG.Curve => {
+      const curve = this.board!.create('curve', [[], []], {
+        ...attrs,
+        fixed: true,
+        highlight: false,
+      })
+      curve.updateDataArray = function (this: JXG.Curve) {
+        this.dataX = getXs()
+        this.dataY = getYs()
+      }
+      return curve
+    }
+
+    this.flowOrigTrailCurve = bindCurve(
+      () => this.flowOrigTrailX,
+      () => this.flowOrigTrailY,
+      {
+        strokeColor: '#94a3b8',
+        strokeWidth: 1.6,
+        strokeOpacity: 0.55,
+      },
+    )
+
+    this.flowOrigHeadCurve = bindCurve(
+      () => this.flowOrigHeadX,
+      () => this.flowOrigHeadY,
+      {
+        strokeColor: '#cbd5e1',
+        strokeWidth: 2.2,
+        strokeOpacity: 0.85,
+      },
+    )
+
+    this.flowTransTrailCurve = bindCurve(
+      () => this.flowTransTrailX,
+      () => this.flowTransTrailY,
+      {
+        strokeColor: '#2dd4bf',
+        strokeWidth: 2,
+        strokeOpacity: 0.88,
+      },
+    )
+
+    this.flowTransHeadCurve = bindCurve(
+      () => this.flowTransHeadX,
+      () => this.flowTransHeadY,
+      {
+        strokeColor: '#f8fafc',
+        strokeWidth: 2.6,
+        strokeOpacity: 0.98,
+      },
+    )
   }
 
   private createCoordinatePlaneAxesAndGrid(): void {
@@ -196,6 +319,11 @@ export class JSXGraphRenderer implements Renderer {
       // 1. Eigenvector invariant lines (drawn behind scene objects)
       if (scene.options.showEigenvectors) {
         this.renderEigenvectorLines(scene)
+      }
+
+      // 1.5. Vector field streamlines (RK4 integral curves behind arrows)
+      if (scene.options.showStreamlines && scene.streamlines.length > 0) {
+        this.renderStreamlines(scene.streamlines, showOriginal, showTransformed, isOverlayComparison)
       }
 
       // 2. Vector fields (drawn behind discrete geometry so shapes/vectors remain crisp)
@@ -304,6 +432,90 @@ export class JSXGraphRenderer implements Renderer {
     }
   }
 
+  private renderStreamlines(
+    streamlines: readonly EvaluatedStreamlines[],
+    showOriginal: boolean,
+    showTransformed: boolean,
+    isOverlayComparison: boolean,
+  ): void {
+    if (!this.board) return
+
+    for (const stream of streamlines) {
+      if (!stream.visible) continue
+
+      if (showOriginal && stream.originalPaths.length > 0) {
+        const xs: number[] = []
+        const ys: number[] = []
+        for (const path of stream.originalPaths) {
+          for (const pt of path) {
+            xs.push(pt[0])
+            ys.push(pt[1])
+          }
+          xs.push(Number.NaN)
+          ys.push(Number.NaN)
+        }
+        const origCurve = this.board.create('curve', [xs, ys], {
+          strokeColor: isOverlayComparison ? '#64748b' : stream.color,
+          strokeWidth: isOverlayComparison ? 1.15 : 1.4,
+          strokeOpacity: isOverlayComparison ? 0.35 : 0.48,
+          dash: isOverlayComparison ? 2 : 0,
+          fixed: true,
+          highlight: false,
+        })
+        this.trackElement(origCurve)
+
+        for (const seed of stream.originalSeeds) {
+          const marker = this.board.create('point', [seed[0], seed[1]], {
+            withLabel: false,
+            size: 2.5,
+            face: 'd',
+            strokeColor: isOverlayComparison ? '#94a3b8' : stream.color,
+            fillColor: isOverlayComparison ? '#94a3b8' : stream.color,
+            fillOpacity: 0.65,
+            fixed: true,
+            highlight: false,
+          })
+          this.trackElement(marker)
+        }
+      }
+
+      if (showTransformed && stream.transformedPaths.length > 0) {
+        const xs: number[] = []
+        const ys: number[] = []
+        for (const path of stream.transformedPaths) {
+          for (const pt of path) {
+            xs.push(pt[0])
+            ys.push(pt[1])
+          }
+          xs.push(Number.NaN)
+          ys.push(Number.NaN)
+        }
+        const transCurve = this.board.create('curve', [xs, ys], {
+          strokeColor: stream.color,
+          strokeWidth: 1.5,
+          strokeOpacity: 0.44,
+          fixed: true,
+          highlight: false,
+        })
+        this.trackElement(transCurve)
+
+        for (const seed of stream.transformedSeeds) {
+          const marker = this.board.create('point', [seed[0], seed[1]], {
+            withLabel: false,
+            size: 3,
+            face: 'd',
+            strokeColor: '#f8fafc',
+            fillColor: stream.color,
+            fillOpacity: 0.9,
+            fixed: true,
+            highlight: false,
+          })
+          this.trackElement(marker)
+        }
+      }
+    }
+  }
+
   private snapDragCoord(val: number): number {
     const step = this.shiftHeld ? 0.25 : 0.05
     return Number((Math.round(val / step) * step).toFixed(4))
@@ -323,7 +535,7 @@ export class JSXGraphRenderer implements Renderer {
         key: 'basis:e1',
         position: scene.basisVectors.transformedE1,
         color: '#ef4444',
-        size: 5,
+        size: 6,
         label: '',
         onDrag: (pos) => cb('e1', pos),
       })
@@ -331,7 +543,7 @@ export class JSXGraphRenderer implements Renderer {
         key: 'basis:e2',
         position: scene.basisVectors.transformedE2,
         color: '#22c55e',
-        size: 5,
+        size: 6,
         label: '',
         onDrag: (pos) => cb('e2', pos),
       })
@@ -347,7 +559,7 @@ export class JSXGraphRenderer implements Renderer {
             key: `point:${objId}`,
             position: item.position,
             color: item.color,
-            size: 5,
+            size: 6,
             label: '',
             onDrag: (pos) => cb(objId, pos),
           })
@@ -358,7 +570,7 @@ export class JSXGraphRenderer implements Renderer {
             key: `vec-tip:${objId}`,
             position: item.tip,
             color: item.color,
-            size: 4,
+            size: 5,
             label: '',
             onDrag: (pos) => cb(objId, pos),
           })
@@ -396,13 +608,14 @@ export class JSXGraphRenderer implements Renderer {
         withLabel: false,
         size: spec.size,
         face: 'o',
+        layer: 9,
         strokeColor: spec.color,
-        strokeWidth: 2,
+        strokeWidth: 2.5,
         fillColor: spec.color,
-        fillOpacity: 0.28,
+        fillOpacity: 0.35,
         highlightStrokeColor: '#ffffff',
         highlightFillColor: spec.color,
-        highlightFillOpacity: 0.55,
+        highlightFillOpacity: 0.65,
         fixed: false,
         highlight: true,
         showInfobox: true,
@@ -835,6 +1048,61 @@ export class JSXGraphRenderer implements Renderer {
     this.createdElements = []
   }
 
+  public updateFlowParticles(batch: FlowRenderBatch | null): void {
+    if (!this.board) return
+
+    if (!batch) {
+      this.flowOrigTrailX = []
+      this.flowOrigTrailY = []
+      this.flowOrigHeadX = []
+      this.flowOrigHeadY = []
+      this.flowTransTrailX = []
+      this.flowTransTrailY = []
+      this.flowTransHeadX = []
+      this.flowTransHeadY = []
+      this.board.update()
+      return
+    }
+
+    const headRadius = this.getParticleHeadRadius()
+    const [ohx, ohy] = buildHeadDiamonds(batch.originalHeadXs, batch.originalHeadYs, headRadius)
+    const [thx, thy] = buildHeadDiamonds(
+      batch.transformedHeadXs,
+      batch.transformedHeadYs,
+      headRadius * 1.15,
+    )
+
+    this.flowOrigTrailX = batch.originalTrailXs
+    this.flowOrigTrailY = batch.originalTrailYs
+    this.flowOrigHeadX = ohx
+    this.flowOrigHeadY = ohy
+
+    this.flowTransTrailX = batch.transformedTrailXs
+    this.flowTransTrailY = batch.transformedTrailYs
+    this.flowTransHeadX = thx
+    this.flowTransHeadY = thy
+
+    if (this.flowTransTrailCurve) {
+      this.flowTransTrailCurve.setAttribute({ strokeColor: batch.primaryColor })
+    }
+
+    this.board.update()
+  }
+
+  private getParticleHeadRadius(): number {
+    if (!this.board) return 0.06
+    const box = this.board.getBoundingBox()
+    const spanX = Math.abs(box[2] - box[0])
+    return Math.max(0.02, spanX * 0.005)
+  }
+
+  public setSeedPlacementMode(enabled: boolean): void {
+    this.seedPlacementMode = enabled
+    if (this.container) {
+      this.container.style.cursor = enabled ? 'crosshair' : ''
+    }
+  }
+
   public zoomIn(): void {
     if (!this.board) return
     this.board.zoomIn()
@@ -873,13 +1141,38 @@ export class JSXGraphRenderer implements Renderer {
   public destroy(): void {
     window.removeEventListener('keydown', this.handleKeyDown)
     window.removeEventListener('keyup', this.handleKeyUp)
+    if (this.container) {
+      this.container.removeEventListener('dblclick', this.handleCanvasDoubleClick)
+      this.container.removeEventListener('pointerdown', this.handleCanvasPointerDown, true)
+      this.container.style.cursor = ''
+    }
     this.createdElements = []
     this.interactiveHandles.clear()
     this.activeDragHandleKey = null
+    this.flowOrigTrailCurve = null
+    this.flowOrigHeadCurve = null
+    this.flowTransTrailCurve = null
+    this.flowTransHeadCurve = null
     if (this.board) {
       JXG.JSXGraph.freeBoard(this.board)
       this.board = null
     }
     this.container = null
   }
+}
+
+function buildHeadDiamonds(
+  xs: readonly number[],
+  ys: readonly number[],
+  r: number,
+): [number[], number[]] {
+  const outX: number[] = []
+  const outY: number[] = []
+  for (let i = 0; i < xs.length; i++) {
+    const x = xs[i]!
+    const y = ys[i]!
+    outX.push(x - r, x, x + r, x, x - r, Number.NaN)
+    outY.push(y, y + r, y, y - r, y, Number.NaN)
+  }
+  return [outX, outY]
 }

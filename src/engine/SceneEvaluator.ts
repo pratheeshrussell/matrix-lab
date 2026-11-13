@@ -33,6 +33,10 @@ import type {
   VectorSceneObject,
 } from '../domain/scene/SceneObject'
 import { analyzeMatrix2, type MatrixAnalysis } from './MatrixProperties'
+import {
+  computeFieldStreamlines,
+  type EvaluatedStreamlines,
+} from './FlowSimulation'
 import { evaluateVectorField, type EvaluatedVectorField } from './VectorFieldEvaluator'
 
 export interface EvaluatedPointGeometry {
@@ -137,6 +141,8 @@ export interface SceneEvaluationOptions {
   showUnitSquare: boolean
   showEigenvectors: boolean
   showTransformedGrid?: boolean
+  showStreamlines?: boolean
+  customFlowSeeds?: readonly Vec2[]
 }
 
 export interface EvaluatedScene {
@@ -155,6 +161,8 @@ export interface EvaluatedScene {
   transformedGeometry: EvaluatedGeometryItem[]
   originalFields: EvaluatedVectorField[]
   transformedFields: EvaluatedVectorField[]
+  fieldDefinitions: VectorFieldSceneObject[]
+  streamlines: EvaluatedStreamlines[]
   basisVectors: EvaluatedBasisVectors
   transformedGridLines: EvaluatedGridLine[]
   options: SceneEvaluationOptions
@@ -358,8 +366,22 @@ export function evaluateScene(
   }
 
   const showTransformedGrid = options.showTransformedGrid ?? true
+  const showStreamlines = options.showStreamlines ?? false
+  const customFlowSeeds = options.customFlowSeeds ?? []
+
   const transformedGridLines = showTransformedGrid
     ? buildTransformedGridLines(activeCompositeMatrix)
+    : []
+
+  const streamlines = showStreamlines
+    ? fieldObjects.map((field) =>
+        computeFieldStreamlines(
+          field,
+          activeCompositeMatrix,
+          options.vectorFieldMode,
+          customFlowSeeds,
+        ),
+      )
     : []
 
   return {
@@ -376,12 +398,16 @@ export function evaluateScene(
     transformedGeometry,
     originalFields: evaluatedFields,
     transformedFields: evaluatedFields,
+    fieldDefinitions: fieldObjects,
+    streamlines,
     basisVectors,
     transformedGridLines,
     options: {
       ...options,
       morphT,
       showTransformedGrid,
+      showStreamlines,
+      customFlowSeeds,
     },
   }
 }

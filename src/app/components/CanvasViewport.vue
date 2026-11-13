@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { EDUCATIONAL_PRESETS } from '../../engine/educationalPresets'
+import { ParticleFlowEngine } from '../../engine/FlowSimulation'
 import { JSXGraphRenderer } from '../../renderers/JSXGraphRenderer'
 import { useSceneStore } from '../../stores/sceneStore'
 import { useTransformationStore } from '../../stores/transformationStore'
@@ -11,12 +12,21 @@ const transformStore = useTransformationStore()
 
 const boardContainerRef = ref<HTMLElement | null>(null)
 const renderer = new JSXGraphRenderer()
+const flowEngine = new ParticleFlowEngine()
 const showExperimentBanner = ref(true)
 const isPlayingMorph = ref(false)
+const isFlowPlaying = ref(false)
+const isSeedMode = ref(false)
 
 let resizeObserver: ResizeObserver | null = null
-let animFrameId: number | null = null
-let lastFrameTime = 0
+let morphFrameId: number | null = null
+let lastMorphFrameTime = 0
+let flowFrameId: number | null = null
+let lastFlowFrameTime = 0
+
+const hasVisibleVectorField = computed(() =>
+  sceneStore.vectorFields.some((f) => f.visible),
+)
 
 const activeExperiment = computed(() =>
   EDUCATIONAL_PRESETS.find((p) => p.id === transformStore.activeEducationalPresetId),
@@ -31,9 +41,9 @@ const singularFieldWarning = computed(() => {
 
 function stopMorphAnimation(): void {
   isPlayingMorph.value = false
-  if (animFrameId !== null) {
-    cancelAnimationFrame(animFrameId)
-    animFrameId = null
+  if (morphFrameId !== null) {
+    cancelAnimationFrame(morphFrameId)
+    morphFrameId = null
   }
 }
 
@@ -54,12 +64,12 @@ function toggleMorphPlayback(): void {
   }
 
   isPlayingMorph.value = true
-  lastFrameTime = performance.now()
+  lastMorphFrameTime = performance.now()
 
   const tick = (now: number): void => {
     if (!isPlayingMorph.value) return
-    const dtSeconds = Math.min(0.05, (now - lastFrameTime) / 1000)
-    lastFrameTime = now
+    const dtSeconds = Math.min(0.05, (now - lastMorphFrameTime) / 1000)
+    lastMorphFrameTime = now
 
     const totalSteps = Math.max(1, transformStore.enabledSteps.length)
     const durationSeconds = 1.6 * totalSteps
@@ -72,10 +82,83 @@ function toggleMorphPlayback(): void {
     }
 
     transformStore.setMorphT(nextT)
-    animFrameId = requestAnimationFrame(tick)
+    morphFrameId = requestAnimationFrame(tick)
   }
 
-  animFrameId = requestAnimationFrame(tick)
+  morphFrameId = requestAnimationFrame(tick)
+}
+
+function syncFlowEngineFromScene(): void {
+  const scene = transformStore.evaluatedScene
+  flowEngine.sync(
+    scene.fieldDefinitions,
+    scene.activeCompositeMatrix,
+    transformStore.vectorFieldMode,
+    transformStore.customFlowSeeds,
+  )
+}
+
+function renderCurrentFlowBatch(): void {
+  if (!isFlowPlaying.value || !hasVisibleVectorField.value) {
+    renderer.updateFlowParticles(null)
+    return
+  }
+  const mode = transformStore.visualizationMode
+  const showOrig = mode === 'original' || mode === 'overlay' || mode === 'step-through'
+  const showTrans = mode === 'transformed' || mode === 'overlay' || mode === 'step-through'
+  renderer.updateFlowParticles(flowEngine.buildRenderBatch(showOrig, showTrans))
+}
+
+function stopFlowAnimation(): void {
+  isFlowPlaying.value = false
+  if (flowFrameId !== null) {
+    cancelAnimationFrame(flowFrameId)
+    flowFrameId = null
+  }
+  renderer.updateFlowParticles(null)
+}
+
+function toggleFlowPlayback(): void {
+  if (isFlowPlaying.value) {
+    stopFlowAnimation()
+    return
+  }
+  if (!hasVisibleVectorField.value) return
+
+  syncFlowEngineFromScene()
+  isFlowPlaying.value = true
+  lastFlowFrameTime = performance.now()
+
+  const tickFlow = (now: number): void => {
+    if (!isFlowPlaying.value) return
+    if (!hasVisibleVectorField.value) {
+      stopFlowAnimation()
+      return
+    }
+    const dtSeconds = Math.min(0.05, (now - lastFlowFrameTime) / 1000)
+    lastFlowFrameTime = now
+    flowEngine.advance(dtSeconds)
+    renderCurrentFlowBatch()
+    flowFrameId = requestAnimationFrame(tickFlow)
+  }
+
+  flowFrameId = requestAnimationFrame(tickFlow)
+}
+
+function setSeedMode(enabled: boolean): void {
+  isSeedMode.value = enabled
+  renderer.setSeedPlacementMode(enabled)
+}
+
+function toggleSeedMode(): void {
+  if (!hasVisibleVectorField.value && !isSeedMode.value) return
+  setSeedMode(!isSeedMode.value)
+}
+
+function handleWindowKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && isSeedMode.value) {
+    setSeedMode(false)
+  }
 }
 
 function handleMorphSliderInput(event: Event): void {
@@ -102,12 +185,24 @@ onMounted(() => {
     onVectorTipDrag: (objectId, tipPos) => {
       sceneStore.updateVectorTip(objectId, tipPos)
     },
+    onCanvasSeedClick: (pos, keepMode) => {
+      transformStore.addFlowSeed(pos)
+      if (!transformStore.showStreamlines && !isFlowPlaying.value) {
+        transformStore.showStreamlines = true
+      }
+      if (isSeedMode.value && !keepMode) {
+        setSeedMode(false)
+      }
+    },
   })
+  window.addEventListener('keydown', handleWindowKeyDown)
+  syncFlowEngineFromScene()
   renderer.render(transformStore.evaluatedScene)
 
   resizeObserver = new ResizeObserver(() => {
     renderer.resize()
     renderer.render(transformStore.evaluatedScene)
+    renderCurrentFlowBatch()
   })
   resizeObserver.observe(boardContainerRef.value)
 })
@@ -115,13 +210,25 @@ onMounted(() => {
 watch(
   () => transformStore.evaluatedScene,
   (newScene) => {
+    syncFlowEngineFromScene()
     renderer.render(newScene)
+    if (isFlowPlaying.value) {
+      renderCurrentFlowBatch()
+    }
   },
   { deep: true },
 )
 
+watch(hasVisibleVectorField, (visible) => {
+  if (!visible && isSeedMode.value) {
+    setSeedMode(false)
+  }
+})
+
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleWindowKeyDown)
   stopMorphAnimation()
+  stopFlowAnimation()
   resizeObserver?.disconnect()
   renderer.destroy()
 })
@@ -185,9 +292,47 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
+      <div class="flow-controls">
+        <button
+          type="button"
+          class="flow-play-btn"
+          :class="{ active: isFlowPlaying }"
+          :disabled="!hasVisibleVectorField"
+          :title="isFlowPlaying ? 'Pause vector field particle flow' : 'Animate particles flowing along the vector field (RK4)'"
+          @click="toggleFlowPlayback"
+        >
+          {{ isFlowPlaying ? '⏸ Pause Flow' : '▶ Flow Particles' }}
+        </button>
+
+        <button
+          type="button"
+          class="seed-mode-btn"
+          :class="{ active: isSeedMode }"
+          :disabled="!hasVisibleVectorField && !isSeedMode"
+          :title="
+            isSeedMode
+              ? 'Click empty canvas to drop a seed (hold Shift for multiple, Esc to cancel)'
+              : 'Click canvas to drop a streamline & particle seed (or double-click anytime)'
+          "
+          @click="toggleSeedMode"
+        >
+          {{ isSeedMode ? '✕ Click Canvas (or Esc)' : '🎯 Drop Seed' }}
+        </button>
+
+        <button
+          v-if="transformStore.customFlowSeeds.length > 0"
+          type="button"
+          class="morph-snap-btn"
+          title="Remove custom user-dropped streamline seeds"
+          @click="transformStore.clearFlowSeeds()"
+        >
+          Clear Seeds ({{ transformStore.customFlowSeeds.length }})
+        </button>
+      </div>
+
       <div class="drag-hint" title="Drag the circular handles directly on the coordinate plane">
         Drag <span class="hint-e1">A·e₁</span>, <span class="hint-e2">A·e₂</span>, points, or vector tips
-        <span class="hint-sub">(Shift = snap 0.25)</span>
+        <span class="hint-sub">(Double-click = drop seed)</span>
       </div>
     </div>
 
@@ -385,6 +530,43 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+.flow-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.38rem;
+}
+
+.flow-play-btn,
+.seed-mode-btn {
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid rgba(45, 212, 191, 0.45);
+  background: rgba(45, 212, 191, 0.12);
+  color: var(--accent-teal);
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.flow-play-btn:hover:not(:disabled),
+.seed-mode-btn:hover:not(:disabled) {
+  background: rgba(45, 212, 191, 0.22);
+}
+
+.flow-play-btn.active,
+.seed-mode-btn.active {
+  background: var(--accent-teal);
+  color: #090d16;
+  border-color: var(--accent-teal);
+}
+
+.flow-play-btn:disabled,
+.seed-mode-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
 .drag-hint {
   font-size: 0.72rem;
   color: var(--text-muted);
@@ -416,6 +598,11 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   flex: 1;
+}
+
+.jsxgraph-canvas :deep(.JXGtext) {
+  pointer-events: none;
+  user-select: none;
 }
 
 .experiment-banner {

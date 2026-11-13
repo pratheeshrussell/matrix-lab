@@ -12,6 +12,11 @@ import { defaultStepParams, type TransformationStep } from '../domain/math/Trans
 import { approxEqualVec2 } from '../domain/math/Vector2'
 import type { PolygonSceneObject, VectorFieldSceneObject } from '../domain/scene/SceneObject'
 import { evaluateScene, interpolatePipeline } from '../engine/SceneEvaluator'
+import {
+  ParticleFlowEngine,
+  computeFieldStreamlines,
+  rk4Step,
+} from '../engine/FlowSimulation'
 import { evaluateVectorField } from '../engine/VectorFieldEvaluator'
 
 describe('ExpressionParser & Scene/VectorField Evaluators', () => {
@@ -203,5 +208,58 @@ describe('ExpressionParser & Scene/VectorField Evaluators', () => {
       showTransformedGrid: false,
     })
     expect(sceneWithoutGrid.transformedGridLines.length).toBe(0)
+  })
+
+  it('integrates RK4 streamlines and particle flow faithfully under Mode A and Mode B', () => {
+    // 1. RK4 on rotational field (-y, x) preserves radius accurately
+    let pos: [number, number] = [2, 0]
+    for (let i = 0; i < 40; i++) {
+      const next = rk4Step(pos, ([x, y]) => [-y, x], 0.05)
+      expect(next).not.toBeNull()
+      pos = [next![0], next![1]]
+    }
+    expect(Math.hypot(pos[0], pos[1])).toBeCloseTo(2, 3)
+
+    // 2. Pushforward streamlines map custom seed s -> A*s and omit transformed paths if singular
+    const rotField: VectorFieldSceneObject = {
+      id: 'vf-flow',
+      name: 'Rotational',
+      category: 'field',
+      type: 'vector-field',
+      preset: 'rotational',
+      exprP: '-y',
+      exprQ: 'x',
+      visible: true,
+      style: { color: '#2dd4bf', fillOpacity: 0, strokeWidth: 2 },
+      domain: { xMin: -4, xMax: 4, yMin: -4, yMax: 4 },
+      stepsX: 7,
+      stepsY: 7,
+      arrowScale: 0.2,
+      normalizeArrows: false,
+    }
+
+    const scaleA = scalingMatrix(2, 1)
+    const streams = computeFieldStreamlines(rotField, scaleA, 'pushforward', [[1, 0]])
+    expect(streams.originalPaths.length).toBeGreaterThan(0)
+    expect(streams.transformedPaths.length).toBeGreaterThan(0)
+    expect(streams.transformedSeeds[0]).toEqual([2, 0])
+
+    const singularStreams = computeFieldStreamlines(
+      rotField,
+      projectionMatrix('x-axis'),
+      'pushforward',
+      [[1, 1]],
+    )
+    expect(singularStreams.originalPaths.length).toBeGreaterThan(0)
+    expect(singularStreams.transformedPaths).toHaveLength(0)
+
+    // 3. ParticleFlowEngine advances particles and builds trails
+    const pool = new ParticleFlowEngine()
+    pool.sync([rotField], scaleA, 'pushforward', [[1, 1]])
+    pool.advance(0.03)
+    pool.advance(0.03)
+    const batch = pool.buildRenderBatch(true, true)
+    expect(batch.originalHeadXs.length).toBeGreaterThan(50)
+    expect(batch.transformedTrailXs.length).toBeGreaterThan(50)
   })
 })

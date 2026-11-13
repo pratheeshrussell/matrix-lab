@@ -75,6 +75,11 @@ function handlePresetChange(event: Event): void {
           <span>Warped Grid</span>
         </label>
 
+        <label class="chip-toggle" title="Display RK4 streamlines for visible vector fields">
+          <input v-model="transformStore.showStreamlines" type="checkbox" />
+          <span>Streamlines</span>
+        </label>
+
         <label class="chip-toggle" title="Display standard basis vectors e1=[1,0] and e2=[0,1]">
           <input v-model="transformStore.showBasisVectors" type="checkbox" />
           <span>Basis <KatexMath tex="\mathbf{e}_1, \mathbf{e}_2" /></span>

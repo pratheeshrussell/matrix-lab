@@ -1,4 +1,5 @@
 import type { Vec2 } from '../domain/math/Vector2'
+import type { FlowRenderBatch } from '../engine/FlowSimulation'
 import type { EvaluatedScene } from '../engine/SceneEvaluator'
 
 /**
@@ -10,6 +11,7 @@ export interface RendererInteractionCallbacks {
   onBasisDrag?: (which: 'e1' | 'e2', newPos: Vec2) => void
   onPointDrag?: (objectId: string, newPos: Vec2) => void
   onVectorTipDrag?: (objectId: string, newTipPos: Vec2) => void
+  onCanvasSeedClick?: (pos: Vec2, keepMode?: boolean) => void
 }
 
 /**
@@ -24,6 +26,8 @@ export interface Renderer {
     callbacks?: RendererInteractionCallbacks,
   ): void
   render(scene: EvaluatedScene): void
+  updateFlowParticles(batch: FlowRenderBatch | null): void
+  setSeedPlacementMode(enabled: boolean): void
   zoomIn(): void
   zoomOut(): void
   resetView(box?: WorldBoundingBox): void

@@ -59,6 +59,8 @@ export const useTransformationStore = defineStore('transformation', () => {
   const showUnitSquare = ref<boolean>(defaultPreset.showUnitSquare)
   const showEigenvectors = ref<boolean>(defaultPreset.showEigenvectors)
   const showTransformedGrid = ref<boolean>(true)
+  const showStreamlines = ref<boolean>(true)
+  const customFlowSeeds = ref<Vec2[]>([])
   const activeEducationalPresetId = ref<string>(defaultPreset.id)
 
   const sceneStore = useSceneStore()
@@ -76,6 +78,8 @@ export const useTransformationStore = defineStore('transformation', () => {
       showUnitSquare: showUnitSquare.value,
       showEigenvectors: showEigenvectors.value,
       showTransformedGrid: showTransformedGrid.value,
+      showStreamlines: showStreamlines.value,
+      customFlowSeeds: customFlowSeeds.value,
     }),
   )
 
@@ -275,6 +279,14 @@ export const useTransformationStore = defineStore('transformation', () => {
     }
   }
 
+  function addFlowSeed(pt: Vec2): void {
+    customFlowSeeds.value.push([Number(pt[0].toFixed(3)), Number(pt[1].toFixed(3))])
+  }
+
+  function clearFlowSeeds(): void {
+    customFlowSeeds.value = []
+  }
+
   function loadEducationalPreset(presetId: string): void {
     const preset = EDUCATIONAL_PRESETS.find((p) => p.id === presetId)
     if (!preset) return
@@ -289,6 +301,7 @@ export const useTransformationStore = defineStore('transformation', () => {
     showEigenvectors.value = preset.showEigenvectors
     activeStepIndex.value = preset.steps.filter((s) => s.enabled).length
     morphT.value = 1
+    customFlowSeeds.value = []
   }
 
   return {
@@ -303,6 +316,8 @@ export const useTransformationStore = defineStore('transformation', () => {
     showUnitSquare,
     showEigenvectors,
     showTransformedGrid,
+    showStreamlines,
+    customFlowSeeds,
     activeEducationalPresetId,
     evaluatedScene,
     addStep,
@@ -319,6 +334,8 @@ export const useTransformationStore = defineStore('transformation', () => {
     setMorphT,
     setActiveStepIndex,
     setTransformedBasisColumn,
+    addFlowSeed,
+    clearFlowSeeds,
     loadEducationalPreset,
   }
 })
