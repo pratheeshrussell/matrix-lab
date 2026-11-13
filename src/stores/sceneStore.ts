@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import type { Vec2 } from '../domain/math/Vector2'
 import {
   VECTOR_FIELD_PRESETS,
   type GeometricSceneObject,
@@ -257,6 +258,20 @@ export const useSceneStore = defineStore('scene', () => {
     }
   }
 
+  function updatePointCoordinates(id: string, pos: Vec2): void {
+    const obj = objects.value.find((o) => o.id === id)
+    if (!obj || obj.type !== 'point') return
+    obj.x = pos[0]
+    obj.y = pos[1]
+  }
+
+  function updateVectorTip(id: string, tipPos: Vec2): void {
+    const obj = objects.value.find((o) => o.id === id)
+    if (!obj || obj.type !== 'vector') return
+    obj.dx = Number((tipPos[0] - obj.ox).toFixed(4))
+    obj.dy = Number((tipPos[1] - obj.oy).toFixed(4))
+  }
+
   return {
     objects,
     selectedObjectId,
@@ -272,5 +287,7 @@ export const useSceneStore = defineStore('scene', () => {
     clearScene,
     clearVectorFields,
     clearGeometricObjects,
+    updatePointCoordinates,
+    updateVectorTip,
   }
 })

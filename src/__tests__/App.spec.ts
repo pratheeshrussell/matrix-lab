@@ -38,4 +38,32 @@ describe('Matrix-Lab Stores Integration', () => {
     expect(c).toBeCloseTo(0)
     expect(d).toBeCloseTo(1)
   })
+
+  it('updates composite matrix columns via direct basis vector dragging and edits scene points/vectors', () => {
+    const sceneStore = useSceneStore()
+    const transformStore = useTransformationStore()
+
+    // Multi-step default pipeline: dragging transformed e1 to (2, -1) updates composite col 1 exactly
+    transformStore.setTransformedBasisColumn('e1', [2, -1])
+    const [a, , c] = transformStore.evaluatedScene.fullCompositeMatrix
+    expect(a).toBeCloseTo(2)
+    expect(c).toBeCloseTo(-1)
+
+    // Empty pipeline: dragging e2 auto-creates a custom matrix step
+    transformStore.clearSteps()
+    transformStore.setTransformedBasisColumn('e2', [0.5, 1.5])
+    expect(transformStore.steps).toHaveLength(1)
+    expect(transformStore.evaluatedScene.fullCompositeMatrix).toEqual([1, 0.5, 0, 1.5])
+
+    // Scene point & vector drag updates
+    const pt = sceneStore.addObject('point')
+    sceneStore.updatePointCoordinates(pt.id, [3.25, -1.5])
+    expect(pt.type === 'point' && pt.x).toBe(3.25)
+    expect(pt.type === 'point' && pt.y).toBe(-1.5)
+
+    const vec = sceneStore.addObject('vector')
+    sceneStore.updateVectorTip(vec.id, [2.5, 4])
+    expect(vec.type === 'vector' && vec.dx).toBe(2.5)
+    expect(vec.type === 'vector' && vec.dy).toBe(4)
+  })
 })

@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { compileMathExpression } from '../domain/math/ExpressionParser'
-import { projectionMatrix, reflectionMatrix, scalingMatrix } from '../domain/math/Matrix2'
-import { defaultStepParams } from '../domain/math/Transform'
+import {
+  IDENTITY_MAT2,
+  approxEqualMat2,
+  projectionMatrix,
+  reflectionMatrix,
+  rotationMatrix,
+  scalingMatrix,
+} from '../domain/math/Matrix2'
+import { defaultStepParams, type TransformationStep } from '../domain/math/Transform'
 import { approxEqualVec2 } from '../domain/math/Vector2'
 import type { PolygonSceneObject, VectorFieldSceneObject } from '../domain/scene/SceneObject'
-import { evaluateScene } from '../engine/SceneEvaluator'
+import { evaluateScene, interpolatePipeline } from '../engine/SceneEvaluator'
 import { evaluateVectorField } from '../engine/VectorFieldEvaluator'
 
 describe('ExpressionParser & Scene/VectorField Evaluators', () => {
@@ -134,5 +141,67 @@ describe('ExpressionParser & Scene/VectorField Evaluators', () => {
       expect(origPoly.vertices[2]).toEqual([1, 3])
       expect(transPoly.vertices[2]).toEqual([1, -3])
     }
+  })
+
+  it('piecewise-interpolates pipeline steps smoothly without collapsing rotations', () => {
+    const stepRot: TransformationStep = {
+      id: 'rot-180',
+      dimension: '2d-linear',
+      name: 'Rotate 180°',
+      type: 'rotation',
+      enabled: true,
+      params: { ...defaultStepParams(), angleDeg: 180 },
+      matrix: rotationMatrix(180),
+    }
+    const stepScale: TransformationStep = {
+      id: 'scale-2',
+      dimension: '2d-linear',
+      name: 'Scale 2x',
+      type: 'scaling',
+      enabled: true,
+      params: { ...defaultStepParams(), sx: 2, sy: 2 },
+      matrix: scalingMatrix(2, 2),
+    }
+
+    const atZero = interpolatePipeline([stepRot, stepScale], 0)
+    expect(approxEqualMat2(atZero.matrix, IDENTITY_MAT2)).toBe(true)
+
+    // At t = 0.25 (halfway through 180 deg rotation), should be Rotate(90 deg), NOT 0 matrix
+    const atQuarter = interpolatePipeline([stepRot, stepScale], 0.25)
+    expect(approxEqualMat2(atQuarter.matrix, rotationMatrix(90))).toBe(true)
+
+    // At t = 0.5 (exact step 1 boundary), should be Rotate(180 deg)
+    const atHalf = interpolatePipeline([stepRot, stepScale], 0.5)
+    expect(approxEqualMat2(atHalf.matrix, rotationMatrix(180))).toBe(true)
+
+    // At t = 1.0, should be Scale(2, 2) * Rotate(180) = [-2, 0, 0, -2]
+    const atOne = interpolatePipeline([stepRot, stepScale], 1)
+    expect(approxEqualMat2(atOne.matrix, [-2, 0, 0, -2])).toBe(true)
+  })
+
+  it('generates warped grid lines when showTransformedGrid is enabled', () => {
+    const sceneWithGrid = evaluateScene([], [], {
+      visualizationMode: 'overlay',
+      activeStepIndex: 0,
+      vectorFieldMode: 'pushforward',
+      pushforwardStyle: 'uniform-target-grid',
+      showBasisVectors: true,
+      showUnitSquare: true,
+      showEigenvectors: false,
+      showTransformedGrid: true,
+    })
+    expect(sceneWithGrid.transformedGridLines.length).toBe(34)
+
+    const sceneWithoutGrid = evaluateScene([], [], {
+      visualizationMode: 'overlay',
+      activeStepIndex: 0,
+      vectorFieldMode: 'pushforward',
+      pushforwardStyle: 'uniform-target-grid',
+      showBasisVectors: true,
+      showUnitSquare: true,
+      showEigenvectors: false,
+      showTransformedGrid: false,
+    })
+    expect(sceneWithoutGrid.transformedGridLines.length).toBe(0)
   })
 })

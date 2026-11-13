@@ -2,7 +2,10 @@ import { compileMathExpression } from '../domain/math/ExpressionParser'
 import {
   IDENTITY_MAT2,
   composePipeline,
+  lerpMat2,
+  multiplyMat2,
   multiplyMat2Vec2,
+  rotationMatrix,
   type Mat2,
 } from '../domain/math/Matrix2'
 import type {
@@ -115,20 +118,31 @@ export interface StepSnapshotInfo {
   cumulativeMatrix: Mat2
 }
 
+export interface EvaluatedGridLine {
+  coord: number
+  isAxis: boolean
+  p1: Vec2
+  p2: Vec2
+}
+
 export interface SceneEvaluationOptions {
   visualizationMode: VisualizationMode
   /** For 'step-through' mode: 0 = original scene, k = after k-th enabled step */
   activeStepIndex: number
+  /** Smooth morph progress in [0, 1] across enabled pipeline steps (defaults to 1) */
+  morphT?: number
   vectorFieldMode: VectorFieldTransformMode
   pushforwardStyle: PushforwardSamplingStyle
   showBasisVectors: boolean
   showUnitSquare: boolean
   showEigenvectors: boolean
+  showTransformedGrid?: boolean
 }
 
 export interface EvaluatedScene {
   visualizationMode: VisualizationMode
   activeStepIndex: number
+  morphT: number
   totalEnabledSteps: number
   stepSnapshots: StepSnapshotInfo[]
   /** The effective composite matrix used for the current view (full pipeline or active step) */
@@ -142,10 +156,100 @@ export interface EvaluatedScene {
   originalFields: EvaluatedVectorField[]
   transformedFields: EvaluatedVectorField[]
   basisVectors: EvaluatedBasisVectors
+  transformedGridLines: EvaluatedGridLine[]
   options: SceneEvaluationOptions
 }
 
 const CIRCLE_SAMPLE_COUNT = 96
+const GRID_LINE_RANGE = 8
+
+/**
+ * Smoothly interpolates a single transformation step for local progress u in [0, 1].
+ * Pure rotation steps interpolate by angle so shapes rotate smoothly without shrinking;
+ * other steps interpolate linearly from Identity to the step's matrix.
+ */
+export function interpolateStepMatrix(step: TransformationStep, u: number): Mat2 {
+  const clampedU = Math.max(0, Math.min(1, u))
+  if (clampedU <= 0) return IDENTITY_MAT2
+  if (clampedU >= 1) return step.matrix
+
+  if (step.type === 'rotation') {
+    return rotationMatrix(step.params.angleDeg * clampedU)
+  }
+  return lerpMat2(IDENTITY_MAT2, step.matrix, clampedU)
+}
+
+/**
+ * Piecewise-smoothly interpolates an ordered pipeline of enabled steps for morphT in [0, 1].
+ * At t = 0 -> Identity I.
+ * At t = k / N -> exact cumulative matrix after k steps.
+ * Between (k-1)/N and k/N -> interpolates the k-th step on top of step k-1's cumulative matrix.
+ */
+export function interpolatePipeline(
+  enabledSteps: readonly TransformationStep[],
+  morphT: number,
+): { matrix: Mat2; currentStepIndex: number } {
+  const count = enabledSteps.length
+  const t = Math.max(0, Math.min(1, morphT))
+
+  if (count === 0 || t <= 0) {
+    return { matrix: IDENTITY_MAT2, currentStepIndex: 0 }
+  }
+  if (t >= 1) {
+    return {
+      matrix: composePipeline(enabledSteps.map((s) => s.matrix)),
+      currentStepIndex: count,
+    }
+  }
+
+  let scaled = t * count
+  // Snap near-exact step boundaries to avoid floating-point drift (e.g. 3 * (1/3))
+  if (Math.abs(scaled - Math.round(scaled)) < 1e-9) {
+    scaled = Math.round(scaled)
+  }
+
+  const completedCount = Math.min(count, Math.floor(scaled))
+  const localU = scaled - completedCount
+
+  const prefixMatrix = composePipeline(
+    enabledSteps.slice(0, completedCount).map((s) => s.matrix),
+  )
+
+  if (localU <= 1e-9 || completedCount >= count) {
+    return {
+      matrix: prefixMatrix,
+      currentStepIndex: completedCount,
+    }
+  }
+
+  const activeStep = enabledSteps[completedCount]!
+  const partialStepMatrix = interpolateStepMatrix(activeStep, localU)
+  return {
+    matrix: multiplyMat2(partialStepMatrix, prefixMatrix),
+    currentStepIndex: completedCount + 1,
+  }
+}
+
+function buildTransformedGridLines(matrix: Mat2, range = GRID_LINE_RANGE): EvaluatedGridLine[] {
+  const lines: EvaluatedGridLine[] = []
+  for (let k = -range; k <= range; k++) {
+    // Vertical line x = k
+    lines.push({
+      coord: k,
+      isAxis: k === 0,
+      p1: multiplyMat2Vec2(matrix, [k, -range]),
+      p2: multiplyMat2Vec2(matrix, [k, range]),
+    })
+    // Horizontal line y = k
+    lines.push({
+      coord: k,
+      isAxis: k === 0,
+      p1: multiplyMat2Vec2(matrix, [-range, k]),
+      p2: multiplyMat2Vec2(matrix, [range, k]),
+    })
+  }
+  return lines
+}
 
 /**
  * Pure function that evaluates the mathematical scene and transformation pipeline
@@ -180,15 +284,26 @@ export function evaluateScene(
   }
 
   const fullCompositeMatrix = composePipeline(matricesInOrder)
-  const clampedStepIndex = Math.max(
+  const morphT = Math.max(0, Math.min(1, options.morphT ?? 1))
+
+  let clampedStepIndex = Math.max(
     0,
     Math.min(enabledSteps.length, Math.round(options.activeStepIndex)),
   )
 
-  const activeCompositeMatrix =
-    options.visualizationMode === 'step-through'
-      ? (stepSnapshots[clampedStepIndex]?.cumulativeMatrix ?? fullCompositeMatrix)
-      : fullCompositeMatrix
+  let activeCompositeMatrix: Mat2
+  if (options.visualizationMode === 'original') {
+    activeCompositeMatrix = IDENTITY_MAT2
+  } else if (morphT < 1) {
+    const interpolated = interpolatePipeline(enabledSteps, morphT)
+    activeCompositeMatrix = interpolated.matrix
+    clampedStepIndex = interpolated.currentStepIndex
+  } else if (options.visualizationMode === 'step-through') {
+    activeCompositeMatrix =
+      stepSnapshots[clampedStepIndex]?.cumulativeMatrix ?? fullCompositeMatrix
+  } else {
+    activeCompositeMatrix = fullCompositeMatrix
+  }
 
   const matrixAnalysis = analyzeMatrix2(fullCompositeMatrix)
   const activeStepAnalysis = analyzeMatrix2(activeCompositeMatrix)
@@ -242,9 +357,15 @@ export function evaluateScene(
     ],
   }
 
+  const showTransformedGrid = options.showTransformedGrid ?? true
+  const transformedGridLines = showTransformedGrid
+    ? buildTransformedGridLines(activeCompositeMatrix)
+    : []
+
   return {
     visualizationMode: options.visualizationMode,
     activeStepIndex: clampedStepIndex,
+    morphT,
     totalEnabledSteps: enabledSteps.length,
     stepSnapshots,
     activeCompositeMatrix,
@@ -256,7 +377,12 @@ export function evaluateScene(
     originalFields: evaluatedFields,
     transformedFields: evaluatedFields,
     basisVectors,
-    options,
+    transformedGridLines,
+    options: {
+      ...options,
+      morphT,
+      showTransformedGrid,
+    },
   }
 }
 

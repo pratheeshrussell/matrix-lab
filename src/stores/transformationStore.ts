@@ -2,10 +2,13 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
   IDENTITY_MAT2,
+  composePipeline,
   inverseMat2,
   mat2,
+  multiplyMat2,
   type Mat2,
 } from '../domain/math/Matrix2'
+import type { Vec2 } from '../domain/math/Vector2'
 import {
   computeMatrixFromPreset,
   defaultStepParams,
@@ -49,11 +52,13 @@ export const useTransformationStore = defineStore('transformation', () => {
   const steps = ref<TransformationStep[]>(defaultPreset.steps.map(cloneStep))
   const visualizationMode = ref<VisualizationMode>(defaultPreset.visualizationMode)
   const activeStepIndex = ref<number>(defaultPreset.steps.length)
+  const morphT = ref<number>(1)
   const vectorFieldMode = ref<VectorFieldTransformMode>(defaultPreset.vectorFieldMode)
   const pushforwardStyle = ref<PushforwardSamplingStyle>(defaultPreset.pushforwardStyle)
   const showBasisVectors = ref<boolean>(defaultPreset.showBasisVectors)
   const showUnitSquare = ref<boolean>(defaultPreset.showUnitSquare)
   const showEigenvectors = ref<boolean>(defaultPreset.showEigenvectors)
+  const showTransformedGrid = ref<boolean>(true)
   const activeEducationalPresetId = ref<string>(defaultPreset.id)
 
   const sceneStore = useSceneStore()
@@ -64,11 +69,13 @@ export const useTransformationStore = defineStore('transformation', () => {
     evaluateScene(sceneStore.objects, steps.value, {
       visualizationMode: visualizationMode.value,
       activeStepIndex: activeStepIndex.value,
+      morphT: morphT.value,
       vectorFieldMode: vectorFieldMode.value,
       pushforwardStyle: pushforwardStyle.value,
       showBasisVectors: showBasisVectors.value,
       showUnitSquare: showUnitSquare.value,
       showEigenvectors: showEigenvectors.value,
+      showTransformedGrid: showTransformedGrid.value,
     }),
   )
 
@@ -86,6 +93,7 @@ export const useTransformationStore = defineStore('transformation', () => {
     }
     steps.value.push(step)
     activeStepIndex.value = enabledSteps.value.length
+    morphT.value = 1
     return step
   }
 
@@ -188,6 +196,83 @@ export const useTransformationStore = defineStore('transformation', () => {
   function clearSteps(): void {
     steps.value = []
     activeStepIndex.value = 0
+    morphT.value = 1
+  }
+
+  function setMorphT(t: number): void {
+    const clamped = Math.max(0, Math.min(1, t))
+    morphT.value = clamped
+    const count = enabledSteps.value.length
+    if (count > 0) {
+      activeStepIndex.value =
+        clamped <= 0 ? 0 : Math.min(count, Math.ceil(clamped * count - 1e-9))
+    }
+  }
+
+  function setActiveStepIndex(idx: number): void {
+    const count = enabledSteps.value.length
+    const clampedIdx = Math.max(0, Math.min(count, Math.round(idx)))
+    activeStepIndex.value = clampedIdx
+    morphT.value = count > 0 ? clampedIdx / count : 1
+  }
+
+  /**
+   * Direct canvas dragging of transformed basis vector tip A*e1 or A*e2.
+   * Updates the active transformation step so the composite matrix columns
+   * match the user's dragged basis vector position.
+   */
+  function setTransformedBasisColumn(which: 'e1' | 'e2', targetVec: Vec2): void {
+    morphT.value = 1
+    const activeList =
+      visualizationMode.value === 'step-through'
+        ? enabledSteps.value.slice(0, Math.max(1, activeStepIndex.value))
+        : enabledSteps.value
+
+    if (activeList.length === 0) {
+      const m: Mat2 =
+        which === 'e1'
+          ? mat2(targetVec[0], 0, targetVec[1], 1)
+          : mat2(1, targetVec[0], 0, targetVec[1])
+      const step: TransformationStep = {
+        id: nextStepId(),
+        dimension: '2d-linear',
+        name: 'Dragged 2×2 Matrix',
+        type: 'custom',
+        enabled: true,
+        params: defaultStepParams(),
+        matrix: m,
+      }
+      steps.value.push(step)
+      activeStepIndex.value = enabledSteps.value.length
+      return
+    }
+
+    const lastStep = activeList[activeList.length - 1]!
+    const currentComposite = composePipeline(activeList.map((s) => s.matrix))
+    const desiredComposite: Mat2 =
+      which === 'e1'
+        ? mat2(targetVec[0], currentComposite[1], targetVec[1], currentComposite[3])
+        : mat2(currentComposite[0], targetVec[0], currentComposite[2], targetVec[1])
+
+    if (activeList.length === 1) {
+      lastStep.matrix = desiredComposite
+      lastStep.type = 'custom'
+      return
+    }
+
+    const prevMatrix = composePipeline(activeList.slice(0, -1).map((s) => s.matrix))
+    const invPrev = inverseMat2(prevMatrix)
+    if (invPrev) {
+      lastStep.matrix = multiplyMat2(desiredComposite, invPrev)
+      lastStep.type = 'custom'
+    } else {
+      // Earlier step is singular; update lastStep's column directly as fallback
+      lastStep.matrix =
+        which === 'e1'
+          ? mat2(targetVec[0], lastStep.matrix[1], targetVec[1], lastStep.matrix[3])
+          : mat2(lastStep.matrix[0], targetVec[0], lastStep.matrix[2], targetVec[1])
+      lastStep.type = 'custom'
+    }
   }
 
   function loadEducationalPreset(presetId: string): void {
@@ -203,6 +288,7 @@ export const useTransformationStore = defineStore('transformation', () => {
     showUnitSquare.value = preset.showUnitSquare
     showEigenvectors.value = preset.showEigenvectors
     activeStepIndex.value = preset.steps.filter((s) => s.enabled).length
+    morphT.value = 1
   }
 
   return {
@@ -210,11 +296,13 @@ export const useTransformationStore = defineStore('transformation', () => {
     enabledSteps,
     visualizationMode,
     activeStepIndex,
+    morphT,
     vectorFieldMode,
     pushforwardStyle,
     showBasisVectors,
     showUnitSquare,
     showEigenvectors,
+    showTransformedGrid,
     activeEducationalPresetId,
     evaluatedScene,
     addStep,
@@ -228,6 +316,9 @@ export const useTransformationStore = defineStore('transformation', () => {
     removeStep,
     appendCompositeInverseStep,
     clearSteps,
+    setMorphT,
+    setActiveStepIndex,
+    setTransformedBasisColumn,
     loadEducationalPreset,
   }
 })

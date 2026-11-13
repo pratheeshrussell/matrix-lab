@@ -8,6 +8,18 @@ const transformStore = useTransformationStore()
 
 const analysis = computed(() => transformStore.evaluatedScene.activeStepAnalysis)
 const isStepThrough = computed(() => transformStore.visualizationMode === 'step-through')
+const headerTitle = computed(() => {
+  if (transformStore.visualizationMode === 'original') {
+    return 'Active Matrix (Identity I)'
+  }
+  if (transformStore.morphT < 1) {
+    return `Active Matrix (t = ${transformStore.morphT.toFixed(2)})`
+  }
+  if (isStepThrough.value) {
+    return `Cumulative Matrix (Step ${transformStore.evaluatedScene.activeStepIndex})`
+  }
+  return 'Composite Matrix M'
+})
 
 function matrixToLatex(m: Mat2): string {
   return `\\begin{bmatrix} ${formatNumber(m[0], 3)} & ${formatNumber(m[1], 3)} \\\\ ${formatNumber(m[2], 3)} & ${formatNumber(m[3], 3)} \\end{bmatrix}`
@@ -18,7 +30,7 @@ function matrixToLatex(m: Mat2): string {
   <section class="analysis-card">
     <div class="analysis-header">
       <h3>
-        {{ isStepThrough ? `Cumulative Matrix (Step ${transformStore.evaluatedScene.activeStepIndex})` : 'Composite Matrix M' }}
+        {{ headerTitle }}
       </h3>
       <span
         class="status-pill"

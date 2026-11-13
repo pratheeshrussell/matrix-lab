@@ -70,6 +70,11 @@ function handlePresetChange(event: Event): void {
     <!-- Reference Overlays & Presets -->
     <div class="toolbar-actions">
       <div class="toggle-group">
+        <label class="chip-toggle" title="Display transformed integer coordinate grid lines">
+          <input v-model="transformStore.showTransformedGrid" type="checkbox" />
+          <span>Warped Grid</span>
+        </label>
+
         <label class="chip-toggle" title="Display standard basis vectors e1=[1,0] and e2=[0,1]">
           <input v-model="transformStore.showBasisVectors" type="checkbox" />
           <span>Basis <KatexMath tex="\mathbf{e}_1, \mathbf{e}_2" /></span>
@@ -108,8 +113,8 @@ function handlePresetChange(event: Event): void {
         <button
           type="button"
           class="btn-sm"
-          :disabled="transformStore.activeStepIndex <= 0"
-          @click="transformStore.activeStepIndex = Math.max(0, transformStore.activeStepIndex - 1)"
+          :disabled="transformStore.evaluatedScene.activeStepIndex <= 0"
+          @click="transformStore.setActiveStepIndex(transformStore.evaluatedScene.activeStepIndex - 1)"
         >
           ◀ Prev
         </button>
@@ -121,7 +126,7 @@ function handlePresetChange(event: Event): void {
             type="button"
             class="step-pill"
             :class="{ active: transformStore.evaluatedScene.activeStepIndex === snap.stepIndex }"
-            @click="transformStore.activeStepIndex = snap.stepIndex"
+            @click="transformStore.setActiveStepIndex(snap.stepIndex)"
           >
             <span class="pill-num">{{ snap.stepIndex === 0 ? '0: Orig' : `Step ${snap.stepIndex}` }}</span>
             <span class="pill-name">{{ snap.stepName }}</span>
@@ -131,13 +136,8 @@ function handlePresetChange(event: Event): void {
         <button
           type="button"
           class="btn-sm"
-          :disabled="transformStore.activeStepIndex >= snapshots.length - 1"
-          @click="
-            transformStore.activeStepIndex = Math.min(
-              snapshots.length - 1,
-              transformStore.activeStepIndex + 1,
-            )
-          "
+          :disabled="transformStore.evaluatedScene.activeStepIndex >= snapshots.length - 1"
+          @click="transformStore.setActiveStepIndex(transformStore.evaluatedScene.activeStepIndex + 1)"
         >
           Next ▶
         </button>

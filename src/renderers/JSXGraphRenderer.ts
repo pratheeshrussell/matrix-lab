@@ -3,6 +3,7 @@ import type { Vec2 } from '../domain/math/Vector2'
 import type {
   EvaluatedCurveGeometry,
   EvaluatedGeometryItem,
+  EvaluatedGridLine,
   EvaluatedLineGeometry,
   EvaluatedPointGeometry,
   EvaluatedPolygonGeometry,
@@ -10,7 +11,11 @@ import type {
   EvaluatedVectorGeometry,
 } from '../engine/SceneEvaluator'
 import type { EvaluatedVectorField, EvaluatedVectorSample } from '../engine/VectorFieldEvaluator'
-import type { Renderer, WorldBoundingBox } from './Renderer'
+import type {
+  Renderer,
+  RendererInteractionCallbacks,
+  WorldBoundingBox,
+} from './Renderer'
 
 const DEFAULT_BOUNDING_BOX: WorldBoundingBox = [-5.5, 5.5, 5.5, -5.5]
 
@@ -18,6 +23,15 @@ interface GeometryRenderStyle {
   isOriginalInOverlay: boolean
   isPrimaryTransformed: boolean
   labelSuffix: string
+}
+
+interface DesiredHandleSpec {
+  key: string
+  position: Vec2
+  color: string
+  size: number
+  label: string
+  onDrag: (pos: Vec2) => void
 }
 
 /**
@@ -28,12 +42,35 @@ export class JSXGraphRenderer implements Renderer {
   private board: JXG.Board | null = null
   private container: HTMLElement | null = null
   private createdElements: Array<JXG.GeometryElement | JXG.Composition | JXG.GeometryElement[]> = []
+  private interactiveHandles = new Map<
+    string,
+    { point: JXG.Point; onDrag: (pos: Vec2) => void }
+  >()
+  private activeDragHandleKey: string | null = null
+  private callbacks: RendererInteractionCallbacks = {}
   private defaultBox: WorldBoundingBox = DEFAULT_BOUNDING_BOX
+  private shiftHeld = false
 
-  public initialize(container: HTMLElement, initialBox: WorldBoundingBox = DEFAULT_BOUNDING_BOX): void {
+  private readonly handleKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === 'Shift') this.shiftHeld = true
+  }
+
+  private readonly handleKeyUp = (e: KeyboardEvent): void => {
+    if (e.key === 'Shift') this.shiftHeld = false
+  }
+
+  public initialize(
+    container: HTMLElement,
+    initialBox: WorldBoundingBox = DEFAULT_BOUNDING_BOX,
+    callbacks: RendererInteractionCallbacks = {},
+  ): void {
     this.destroy()
     this.container = container
     this.defaultBox = initialBox
+    this.callbacks = callbacks
+
+    window.addEventListener('keydown', this.handleKeyDown)
+    window.addEventListener('keyup', this.handleKeyUp)
 
     this.board = JXG.JSXGraph.initBoard(container, {
       boundingbox: [...initialBox],
@@ -151,6 +188,11 @@ export class JSXGraphRenderer implements Renderer {
         mode === 'transformed' || mode === 'overlay' || mode === 'step-through'
       const isOverlayComparison = mode === 'overlay' || mode === 'step-through'
 
+      // 0. Warped / Transformed Coordinate Grid (drawn behind all mathematical objects)
+      if (showTransformed && scene.transformedGridLines.length > 0) {
+        this.renderTransformedGrid(scene.transformedGridLines)
+      }
+
       // 1. Eigenvector invariant lines (drawn behind scene objects)
       if (scene.options.showEigenvectors) {
         this.renderEigenvectorLines(scene)
@@ -214,8 +256,179 @@ export class JSXGraphRenderer implements Renderer {
       if (scene.options.showBasisVectors) {
         this.renderBasisVectors(scene, showOriginal, showTransformed, isOverlayComparison)
       }
+
+      // 6. Persistent Interactive Drag Handles (basis tips, original points, vector tips)
+      this.reconcileInteractiveHandles(scene, showOriginal, showTransformed)
     } finally {
       this.board.unsuspendUpdate()
+    }
+  }
+
+  private renderTransformedGrid(lines: readonly EvaluatedGridLine[]): void {
+    if (!this.board) return
+    const minorXs: number[] = []
+    const minorYs: number[] = []
+    const axisXs: number[] = []
+    const axisYs: number[] = []
+
+    for (const line of lines) {
+      if (line.isAxis) {
+        axisXs.push(line.p1[0], line.p2[0], Number.NaN)
+        axisYs.push(line.p1[1], line.p2[1], Number.NaN)
+      } else {
+        minorXs.push(line.p1[0], line.p2[0], Number.NaN)
+        minorYs.push(line.p1[1], line.p2[1], Number.NaN)
+      }
+    }
+
+    if (minorXs.length > 0) {
+      const minorGrid = this.board.create('curve', [minorXs, minorYs], {
+        strokeColor: '#38bdf8',
+        strokeWidth: 1,
+        strokeOpacity: 0.22,
+        fixed: true,
+        highlight: false,
+      })
+      this.trackElement(minorGrid)
+    }
+
+    if (axisXs.length > 0) {
+      const warpedAxes = this.board.create('curve', [axisXs, axisYs], {
+        strokeColor: '#38bdf8',
+        strokeWidth: 1.5,
+        strokeOpacity: 0.48,
+        fixed: true,
+        highlight: false,
+      })
+      this.trackElement(warpedAxes)
+    }
+  }
+
+  private snapDragCoord(val: number): number {
+    const step = this.shiftHeld ? 0.25 : 0.05
+    return Number((Math.round(val / step) * step).toFixed(4))
+  }
+
+  private reconcileInteractiveHandles(
+    scene: EvaluatedScene,
+    showOriginal: boolean,
+    showTransformed: boolean,
+  ): void {
+    if (!this.board) return
+    const specs: DesiredHandleSpec[] = []
+
+    if (scene.options.showBasisVectors && showTransformed && this.callbacks.onBasisDrag) {
+      const cb = this.callbacks.onBasisDrag
+      specs.push({
+        key: 'basis:e1',
+        position: scene.basisVectors.transformedE1,
+        color: '#ef4444',
+        size: 5,
+        label: '',
+        onDrag: (pos) => cb('e1', pos),
+      })
+      specs.push({
+        key: 'basis:e2',
+        position: scene.basisVectors.transformedE2,
+        color: '#22c55e',
+        size: 5,
+        label: '',
+        onDrag: (pos) => cb('e2', pos),
+      })
+    }
+
+    if (showOriginal) {
+      for (const item of scene.originalGeometry) {
+        if (!item.visible) continue
+        if (item.kind === 'point' && this.callbacks.onPointDrag) {
+          const cb = this.callbacks.onPointDrag
+          const objId = item.id
+          specs.push({
+            key: `point:${objId}`,
+            position: item.position,
+            color: item.color,
+            size: 5,
+            label: '',
+            onDrag: (pos) => cb(objId, pos),
+          })
+        } else if (item.kind === 'vector' && this.callbacks.onVectorTipDrag) {
+          const cb = this.callbacks.onVectorTipDrag
+          const objId = item.id
+          specs.push({
+            key: `vec-tip:${objId}`,
+            position: item.tip,
+            color: item.color,
+            size: 4,
+            label: '',
+            onDrag: (pos) => cb(objId, pos),
+          })
+        }
+      }
+    }
+
+    const desiredKeys = new Set(specs.map((s) => s.key))
+
+    // Remove stale handles (unless currently being dragged)
+    for (const [key, entry] of this.interactiveHandles.entries()) {
+      if (!desiredKeys.has(key) && this.activeDragHandleKey !== key) {
+        this.board.removeObject(entry.point)
+        this.interactiveHandles.delete(key)
+      }
+    }
+
+    // Create or update desired handles
+    for (const spec of specs) {
+      const existing = this.interactiveHandles.get(spec.key)
+      if (existing) {
+        existing.onDrag = spec.onDrag
+        if (this.activeDragHandleKey !== spec.key) {
+          existing.point.moveTo([spec.position[0], spec.position[1]], 0)
+          existing.point.setAttribute({
+            strokeColor: spec.color,
+            fillColor: spec.color,
+          })
+        }
+        continue
+      }
+
+      const pt = this.board.create('point', [spec.position[0], spec.position[1]], {
+        name: spec.label,
+        withLabel: false,
+        size: spec.size,
+        face: 'o',
+        strokeColor: spec.color,
+        strokeWidth: 2,
+        fillColor: spec.color,
+        fillOpacity: 0.28,
+        highlightStrokeColor: '#ffffff',
+        highlightFillColor: spec.color,
+        highlightFillOpacity: 0.55,
+        fixed: false,
+        highlight: true,
+        showInfobox: true,
+      })
+
+      const entry = { point: pt, onDrag: spec.onDrag }
+      this.interactiveHandles.set(spec.key, entry)
+
+      pt.on('down', () => {
+        this.activeDragHandleKey = spec.key
+      })
+
+      pt.on('drag', () => {
+        const currentEntry = this.interactiveHandles.get(spec.key)
+        if (!currentEntry) return
+        const nx = this.snapDragCoord(pt.X())
+        const ny = this.snapDragCoord(pt.Y())
+        currentEntry.onDrag([nx, ny])
+      })
+
+      pt.on('up', () => {
+        if (this.activeDragHandleKey === spec.key) {
+          this.activeDragHandleKey = null
+          pt.moveTo([this.snapDragCoord(pt.X()), this.snapDragCoord(pt.Y())], 0)
+        }
+      })
     }
   }
 
@@ -649,11 +862,20 @@ export class JSXGraphRenderer implements Renderer {
     if (!this.board) return
     this.board.suspendUpdate()
     this.clearDynamicElements()
+    for (const entry of this.interactiveHandles.values()) {
+      this.board.removeObject(entry.point)
+    }
+    this.interactiveHandles.clear()
+    this.activeDragHandleKey = null
     this.board.unsuspendUpdate()
   }
 
   public destroy(): void {
+    window.removeEventListener('keydown', this.handleKeyDown)
+    window.removeEventListener('keyup', this.handleKeyUp)
     this.createdElements = []
+    this.interactiveHandles.clear()
+    this.activeDragHandleKey = null
     if (this.board) {
       JXG.JSXGraph.freeBoard(this.board)
       this.board = null
