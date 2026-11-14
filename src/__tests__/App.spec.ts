@@ -1,6 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { approxEqualMat2 } from '../domain/math/Matrix2'
+import {
+  buildShareUrl,
+  decodeShareState,
+  extractShareTokenFromLocation,
+} from '../engine/ShareState'
 import { useSceneStore } from '../stores/sceneStore'
 import { useTransformationStore } from '../stores/transformationStore'
 
@@ -83,5 +88,41 @@ describe('Matrix-Lab Stores Integration', () => {
     expect(svdGeom.enabled).toBe(true)
     expect(svdGeom.unitCirclePoints.length).toBeGreaterThan(30)
     expect(svdGeom.transformedEllipsePoints.length).toBe(svdGeom.unitCirclePoints.length)
+  })
+
+  it('round-trips full scene and pipeline state through shareable URL links', () => {
+    const sceneStore = useSceneStore()
+    const transformStore = useTransformationStore()
+
+    transformStore.decomposePipelineToSvd()
+    transformStore.addFlowSeed([1.25, -2.5])
+    transformStore.showSubspaces = false
+    transformStore.setMorphT(0.65)
+    sceneStore.addObject('point')
+
+    const snapshot = transformStore.exportShareSnapshot()
+    const shareUrl = buildShareUrl('https://pratheeshrussell.github.io/matrix-lab/', snapshot)
+    const parsedUrl = new URL(shareUrl)
+
+    const token = extractShareTokenFromLocation(parsedUrl.search, parsedUrl.hash)
+    expect(token).not.toBeNull()
+    const decoded = decodeShareState(token!)
+    expect(decoded).not.toBeNull()
+
+    // Apply into a clean Pinia instance
+    setActivePinia(createPinia())
+    const freshScene = useSceneStore()
+    const freshTransform = useTransformationStore()
+    freshTransform.applyShareSnapshot(decoded!)
+
+    expect(freshTransform.steps).toHaveLength(3)
+    expect(freshTransform.customFlowSeeds).toEqual([[1.25, -2.5]])
+    expect(freshTransform.showSvd).toBe(true)
+    expect(freshTransform.showSubspaces).toBe(false)
+    expect(freshTransform.morphT).toBeCloseTo(0.65)
+    expect(freshScene.objects.length).toBe(snapshot.objects.length)
+
+    // Invalid token fails safely
+    expect(decodeShareState('not-valid-base64!!!')).toBeNull()
   })
 })

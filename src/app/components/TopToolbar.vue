@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { formatNumber, type Mat2 } from '../../domain/math/Matrix2'
 import type { VisualizationMode } from '../../domain/math/Transform'
 import { EDUCATIONAL_PRESETS } from '../../engine/educationalPresets'
+import { buildShareUrl } from '../../engine/ShareState'
 import { useTransformationStore } from '../../stores/transformationStore'
 import KatexMath from './KatexMath.vue'
 
 const transformStore = useTransformationStore()
+const shareStatus = ref<'idle' | 'copied' | 'updated'>('idle')
+let shareResetTimer: number | null = null
 
 const modes: { id: VisualizationMode; label: string; hint: string }[] = [
   { id: 'original', label: 'Original', hint: 'Show only untransformed scene (Identity)' },
@@ -34,6 +37,36 @@ function handlePresetChange(event: Event): void {
     transformStore.loadEducationalPreset(target.value)
   }
 }
+
+async function copyShareLink(): Promise<void> {
+  const shareUrl = buildShareUrl(window.location.href, transformStore.exportShareSnapshot())
+  window.history.replaceState(null, '', shareUrl)
+
+  let copied = false
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      copied = true
+    } catch {
+      copied = false
+    }
+  }
+
+  shareStatus.value = copied ? 'copied' : 'updated'
+  if (shareResetTimer !== null) {
+    window.clearTimeout(shareResetTimer)
+  }
+  shareResetTimer = window.setTimeout(() => {
+    shareStatus.value = 'idle'
+    shareResetTimer = null
+  }, 2200)
+}
+
+onBeforeUnmount(() => {
+  if (shareResetTimer !== null) {
+    window.clearTimeout(shareResetTimer)
+  }
+})
 </script>
 
 <template>
@@ -112,18 +145,36 @@ function handlePresetChange(event: Event): void {
         </label>
       </div>
 
-      <div class="preset-selector">
-        <label for="edu-preset-select" class="sr-only">Educational Experiments</label>
-        <select
-          id="edu-preset-select"
-          :value="transformStore.activeEducationalPresetId"
-          class="select-input"
-          @change="handlePresetChange"
+      <div class="preset-share-group">
+        <div class="preset-selector">
+          <label for="edu-preset-select" class="sr-only">Educational Experiments</label>
+          <select
+            id="edu-preset-select"
+            :value="transformStore.activeEducationalPresetId"
+            class="select-input"
+            @change="handlePresetChange"
+          >
+            <option v-for="preset in EDUCATIONAL_PRESETS" :key="preset.id" :value="preset.id">
+              {{ preset.title }}
+            </option>
+          </select>
+        </div>
+
+        <button
+          type="button"
+          class="share-btn"
+          :class="{ copied: shareStatus !== 'idle' }"
+          title="Encode current scene, matrices, and overlays into a shareable URL and copy to clipboard"
+          @click="copyShareLink"
         >
-          <option v-for="preset in EDUCATIONAL_PRESETS" :key="preset.id" :value="preset.id">
-            {{ preset.title }}
-          </option>
-        </select>
+          {{
+            shareStatus === 'copied'
+              ? '✓ Link Copied'
+              : shareStatus === 'updated'
+                ? '✓ URL Updated'
+                : '🔗 Share'
+          }}
+        </button>
       </div>
     </div>
 
@@ -300,6 +351,12 @@ function handlePresetChange(event: Event): void {
   margin: 0;
 }
 
+.preset-share-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .select-input {
   background: var(--bg-elevated);
   color: var(--text-primary);
@@ -307,10 +364,33 @@ function handlePresetChange(event: Event): void {
   border-radius: 6px;
   padding: 0.28rem 0.45rem;
   font-size: 0.73rem;
-  max-width: 185px;
+  max-width: 160px;
 }
 
-@media (max-width: 1380px) {
+.share-btn {
+  padding: 0.28rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent-cyan);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+}
+
+.share-btn:hover {
+  background: rgba(56, 189, 248, 0.22);
+}
+
+.share-btn.copied {
+  border-color: rgba(45, 212, 191, 0.65);
+  background: rgba(45, 212, 191, 0.18);
+  color: var(--accent-teal);
+}
+
+@media (max-width: 1420px) {
   .toolbar-actions {
     width: 100%;
     margin-left: 0;

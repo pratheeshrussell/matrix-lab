@@ -22,6 +22,7 @@ import {
 import { EDUCATIONAL_PRESETS } from '../engine/educationalPresets'
 import { analyzeMatrix2 } from '../engine/MatrixProperties'
 import { evaluateScene, type EvaluatedScene } from '../engine/SceneEvaluator'
+import type { SharedStateSnapshot } from '../engine/ShareState'
 import { useSceneStore } from './sceneStore'
 
 let stepIdCounter = 100
@@ -369,6 +370,47 @@ export const useTransformationStore = defineStore('transformation', () => {
     customFlowSeeds.value = []
   }
 
+  function exportShareSnapshot(): SharedStateSnapshot {
+    return {
+      v: 1,
+      objects: JSON.parse(JSON.stringify(sceneStore.objects)),
+      steps: steps.value.map(cloneStep),
+      visualizationMode: visualizationMode.value,
+      activeStepIndex: activeStepIndex.value,
+      morphT: morphT.value,
+      vectorFieldMode: vectorFieldMode.value,
+      pushforwardStyle: pushforwardStyle.value,
+      showBasisVectors: showBasisVectors.value,
+      showUnitSquare: showUnitSquare.value,
+      showEigenvectors: showEigenvectors.value,
+      showSvd: showSvd.value,
+      showSubspaces: showSubspaces.value,
+      showTransformedGrid: showTransformedGrid.value,
+      showStreamlines: showStreamlines.value,
+      customFlowSeeds: customFlowSeeds.value.map((pt) => [pt[0], pt[1]]),
+      activeEducationalPresetId: activeEducationalPresetId.value,
+    }
+  }
+
+  function applyShareSnapshot(snapshot: SharedStateSnapshot): void {
+    sceneStore.setSceneObjects(snapshot.objects)
+    steps.value = snapshot.steps.map(cloneStep)
+    visualizationMode.value = snapshot.visualizationMode
+    activeStepIndex.value = snapshot.activeStepIndex
+    morphT.value = snapshot.morphT
+    vectorFieldMode.value = snapshot.vectorFieldMode
+    pushforwardStyle.value = snapshot.pushforwardStyle
+    showBasisVectors.value = snapshot.showBasisVectors
+    showUnitSquare.value = snapshot.showUnitSquare
+    showEigenvectors.value = snapshot.showEigenvectors
+    showSvd.value = snapshot.showSvd
+    showSubspaces.value = snapshot.showSubspaces
+    showTransformedGrid.value = snapshot.showTransformedGrid
+    showStreamlines.value = snapshot.showStreamlines
+    customFlowSeeds.value = snapshot.customFlowSeeds.map((pt) => [pt[0], pt[1]])
+    activeEducationalPresetId.value = snapshot.activeEducationalPresetId
+  }
+
   return {
     steps,
     enabledSteps,
@@ -405,5 +447,7 @@ export const useTransformationStore = defineStore('transformation', () => {
     addFlowSeed,
     clearFlowSeeds,
     loadEducationalPreset,
+    exportShareSnapshot,
+    applyShareSnapshot,
   }
 })

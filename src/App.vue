@@ -1,8 +1,33 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from 'vue'
 import CanvasViewport from './app/components/CanvasViewport.vue'
 import SceneObjectsPanel from './app/components/SceneObjectsPanel.vue'
 import TopToolbar from './app/components/TopToolbar.vue'
 import TransformationPipelinePanel from './app/components/TransformationPipelinePanel.vue'
+import { decodeShareState, extractShareTokenFromLocation } from './engine/ShareState'
+import { useTransformationStore } from './stores/transformationStore'
+
+const transformStore = useTransformationStore()
+
+function hydrateFromUrl(): void {
+  if (typeof window === 'undefined') return
+  const token = extractShareTokenFromLocation(window.location.search, window.location.hash)
+  if (!token) return
+  const snapshot = decodeShareState(token)
+  if (snapshot) {
+    transformStore.applyShareSnapshot(snapshot)
+  }
+}
+
+hydrateFromUrl()
+
+onMounted(() => {
+  window.addEventListener('hashchange', hydrateFromUrl)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', hydrateFromUrl)
+})
 </script>
 
 <template>
