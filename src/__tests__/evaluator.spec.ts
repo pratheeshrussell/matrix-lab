@@ -17,7 +17,10 @@ import {
   computeFieldStreamlines,
   rk4Step,
 } from '../engine/FlowSimulation'
-import { evaluateVectorField } from '../engine/VectorFieldEvaluator'
+import {
+  evaluateVectorField,
+  probeVectorFieldAt,
+} from '../engine/VectorFieldEvaluator'
 
 describe('ExpressionParser & Scene/VectorField Evaluators', () => {
   it('compiles and evaluates valid mathjs expressions and reports errors on invalid ones', () => {
@@ -261,5 +264,99 @@ describe('ExpressionParser & Scene/VectorField Evaluators', () => {
     const batch = pool.buildRenderBatch(true, true)
     expect(batch.originalHeadXs.length).toBeGreaterThan(50)
     expect(batch.transformedTrailXs.length).toBeGreaterThan(50)
+  })
+
+  it('computes accurate divergence and 2D curl for radial, rotational, and saddle fields', () => {
+    const baseField: VectorFieldSceneObject = {
+      id: 'vf-calc',
+      name: 'Calc Test',
+      category: 'field',
+      type: 'vector-field',
+      preset: 'radial',
+      exprP: 'x',
+      exprQ: 'y',
+      visible: true,
+      style: { color: '#2dd4bf', fillOpacity: 0, strokeWidth: 2 },
+      domain: { xMin: -2, xMax: 2, yMin: -2, yMax: 2 },
+      stepsX: 3,
+      stepsY: 3,
+      arrowScale: 0.2,
+      normalizeArrows: false,
+    }
+
+    // Radial (x, y) -> Div = 2, Curl = 0
+    const radialEval = evaluateVectorField(baseField, rotationMatrix(90), 'pushforward')
+    expect(radialEval.originCalculus.origDiv).toBeCloseTo(2, 4)
+    expect(radialEval.originCalculus.origCurl).toBeCloseTo(0, 4)
+
+    // Rotational (-y, x) -> Div = 0, Curl = 2; under reflection det < 0 curl flips sign to -2!
+    const rotField: VectorFieldSceneObject = {
+      ...baseField,
+      preset: 'rotational',
+      exprP: '-y',
+      exprQ: 'x',
+    }
+    const rotReflected = evaluateVectorField(rotField, reflectionMatrix('x-axis'), 'pushforward')
+    expect(rotReflected.originCalculus.origDiv).toBeCloseTo(0, 4)
+    expect(rotReflected.originCalculus.origCurl).toBeCloseTo(2, 4)
+    expect(rotReflected.originCalculus.transDiv).toBeCloseTo(0, 4)
+    expect(rotReflected.originCalculus.transCurl).toBeCloseTo(-2, 4)
+
+    // Saddle (x, -y) -> Div = 0, Curl = 0
+    const saddleField: VectorFieldSceneObject = {
+      ...baseField,
+      preset: 'saddle',
+      exprP: 'x',
+      exprQ: '-y',
+    }
+    const saddleEval = evaluateVectorField(saddleField, IDENTITY_MAT2, 'pushforward')
+    expect(saddleEval.originCalculus.origDiv).toBeCloseTo(0, 4)
+    expect(saddleEval.originCalculus.origCurl).toBeCloseTo(0, 4)
+  })
+
+  it('evaluates scalar potential gradients ∇f, level contours, and live point probes', () => {
+    const scalarField: VectorFieldSceneObject = {
+      id: 'vf-scalar',
+      name: 'Bowl Potential',
+      category: 'field',
+      type: 'vector-field',
+      preset: 'custom',
+      exprP: 'x / 2',
+      exprQ: 'y / 2',
+      inputMode: 'scalar-gradient',
+      scalarPreset: 'bowl',
+      exprScalar: '(x^2 + y^2) / 4',
+      colorOverlay: 'scalar',
+      showContours: true,
+      visible: true,
+      style: { color: '#2dd4bf', fillOpacity: 0, strokeWidth: 2 },
+      domain: { xMin: -4, xMax: 4, yMin: -4, yMax: 4 },
+      stepsX: 5,
+      stepsY: 5,
+      arrowScale: 0.25,
+      normalizeArrows: false,
+    }
+
+    const scaleM = scalingMatrix(2, 1)
+    const evaluated = evaluateVectorField(scalarField, scaleM, 'pushforward')
+
+    expect(evaluated.expressionError).toBeNull()
+    expect(evaluated.inputMode).toBe('scalar-gradient')
+    expect(evaluated.originCalculus.origDiv).toBeCloseTo(1, 3)
+    expect(evaluated.originCalculus.origCurl).toBeCloseTo(0, 3)
+    expect(evaluated.originalContourPaths.length).toBeGreaterThan(20)
+    expect(evaluated.transformedContourPaths.length).toBeGreaterThan(20)
+
+    // Probe at (2, 1): f(2,1) = (4+1)/4 = 1.25, ∇f(2,1) = (1, 0.5)
+    // Under pushforward by diag(2, 1): A^-1 * (2, 1) = (1, 1), f(1,1) = 0.5, A * ∇f(1,1) = (2*0.5, 1*0.5) = (1, 0.5)
+    const probe = probeVectorFieldAt(scalarField, [2, 1], scaleM, 'pushforward')
+    expect(probe).not.toBeNull()
+    expect(probe!.origScalar).toBeCloseTo(1.25, 5)
+    expect(probe!.origVector![0]).toBeCloseTo(1, 4)
+    expect(probe!.origVector![1]).toBeCloseTo(0.5, 4)
+    expect(probe!.origCurl).toBeCloseTo(0, 3)
+    expect(probe!.transScalar).toBeCloseTo(0.5, 5)
+    expect(probe!.transVector![0]).toBeCloseTo(1, 4)
+    expect(probe!.transVector![1]).toBeCloseTo(0.5, 4)
   })
 })

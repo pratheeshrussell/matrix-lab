@@ -2,10 +2,13 @@
 import { computed } from 'vue'
 import type { Vec2 } from '../../domain/math/Vector2'
 import {
-  VECTOR_FIELD_PRESETS,
+  SCALAR_FIELD_PRESETS,
+  type FieldColorOverlayMode,
   type PolygonSceneObject,
+  type ScalarFieldPresetId,
   type SceneObject,
   type VectorFieldPresetId,
+  type VectorFieldSceneObject,
 } from '../../domain/scene/SceneObject'
 import { useSceneStore } from '../../stores/sceneStore'
 import { useTransformationStore } from '../../stores/transformationStore'
@@ -22,6 +25,8 @@ const addButtons: { type: SceneObject['type']; label: string; icon: string }[] =
   { type: 'circle', label: 'Circle', icon: '◯' },
   { type: 'curve', label: 'Curve', icon: '∿' },
 ]
+
+const showTransformedCalculus = computed(() => transformStore.visualizationMode !== 'original')
 
 const evaluatedFieldsById = computed(() => {
   const map = new Map<string, (typeof transformStore.evaluatedScene.transformedFields)[number]>()
@@ -69,6 +74,48 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
   const select = event.target as HTMLSelectElement
   sceneStore.applyVectorFieldPreset(fieldId, select.value as VectorFieldPresetId)
 }
+
+function handleScalarPresetChange(fieldId: string, event: Event): void {
+  const select = event.target as HTMLSelectElement
+  sceneStore.applyScalarFieldPreset(fieldId, select.value as ScalarFieldPresetId)
+}
+
+function setFieldScalarExpr(field: VectorFieldSceneObject, event: Event): void {
+  field.exprScalar = (event.target as HTMLInputElement).value
+  field.scalarPreset = 'custom'
+}
+
+function setFieldShowContours(field: VectorFieldSceneObject, event: Event): void {
+  field.showContours = (event.target as HTMLInputElement).checked
+}
+
+function setFieldOverlay(field: VectorFieldSceneObject, overlay: FieldColorOverlayMode): void {
+  field.colorOverlay = overlay
+}
+
+function getScalarPresetDescription(presetId: ScalarFieldPresetId | undefined): string {
+  if (!presetId || presetId === 'custom') {
+    return 'Arrows show uphill gradient ∇f = (∂f/∂x, ∂f/∂y), perpendicular to level curves f = c with Curl = 0.'
+  }
+  return SCALAR_FIELD_PRESETS[presetId].description
+}
+
+function formatCalc(val: number): string {
+  if (Math.abs(val) < 1e-4) return '0'
+  return Number(val.toFixed(2)).toString()
+}
+
+function divergenceTag(val: number): string {
+  if (val > 0.05) return 'Source'
+  if (val < -0.05) return 'Sink'
+  return 'Incompressible'
+}
+
+function curlTag(val: number): string {
+  if (val > 0.05) return 'CCW Spin'
+  if (val < -0.05) return 'CW Spin'
+  return 'Curl-Free'
+}
 </script>
 
 <template>
@@ -89,7 +136,7 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
       </div>
     </div>
 
-    <!-- Quick Add Geometric Objects + Vector Field -->
+    <!-- Quick Add Geometric Objects + Vector/Scalar Field -->
     <div class="quick-add-section">
       <div class="section-label">Add Geometric Object</div>
       <div class="add-grid">
@@ -105,14 +152,26 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
         </button>
       </div>
 
-      <button
-        type="button"
-        class="add-field-btn"
-        @click="sceneStore.addObject('vector-field')"
-      >
-        <span>+ Add Vector Field</span>
-        <KatexMath tex="\mathbf{F}(x,y)" />
-      </button>
+      <div class="field-add-row">
+        <button
+          type="button"
+          class="add-field-btn"
+          title="Add a 2D vector field F(x,y) = (P, Q)"
+          @click="sceneStore.addObject('vector-field')"
+        >
+          <span>+ Vector Field</span>
+          <KatexMath tex="\mathbf{F}" />
+        </button>
+        <button
+          type="button"
+          class="add-field-btn scalar"
+          title="Add a scalar potential f(x,y) with level contours and uphill gradient ∇f"
+          @click="sceneStore.addScalarGradientField()"
+        >
+          <span>+ Scalar Potential</span>
+          <KatexMath tex="\nabla f" />
+        </button>
+      </div>
     </div>
 
     <div class="panel-scroll">
@@ -249,40 +308,207 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
           </div>
 
           <div class="card-body">
-            <div class="field-row">
-              <label>Preset</label>
-              <select
-                :value="field.preset"
-                class="mini-select"
-                @change="handleFieldPresetChange(field.id, $event)"
+            <!-- Input Mode Toggle: Direct Vector (P, Q) vs Scalar Potential f(x,y) -> ∇f -->
+            <div class="input-mode-tabs">
+              <button
+                type="button"
+                class="mode-pill"
+                :class="{ active: (field.inputMode ?? 'vector') === 'vector' }"
+                @click="sceneStore.setFieldInputMode(field.id, 'vector')"
               >
-                <option value="radial">Radial: (x, y)</option>
-                <option value="rotational">Rotational: (-y, x)</option>
-                <option value="saddle">Saddle: (x, -y)</option>
-                <option value="constant">Constant: (1, 0)</option>
-                <option value="custom">Custom Expression</option>
-              </select>
+                Vector F = (P, Q)
+              </button>
+              <button
+                type="button"
+                class="mode-pill"
+                :class="{ active: field.inputMode === 'scalar-gradient' }"
+                @click="sceneStore.setFieldInputMode(field.id, 'scalar-gradient')"
+              >
+                Scalar f(x,y) → ∇f
+              </button>
             </div>
 
-            <div class="expr-grid">
+            <!-- Vector Input Mode -->
+            <template v-if="(field.inputMode ?? 'vector') === 'vector'">
+              <div class="field-row">
+                <label>Preset</label>
+                <select
+                  :value="field.preset"
+                  class="mini-select"
+                  @change="handleFieldPresetChange(field.id, $event)"
+                >
+                  <option value="radial">Radial: (x, y)</option>
+                  <option value="rotational">Rotational: (-y, x)</option>
+                  <option value="saddle">Saddle: (x, -y)</option>
+                  <option value="constant">Constant: (1, 0)</option>
+                  <option value="custom">Custom Expression</option>
+                </select>
+              </div>
+
+              <div class="expr-grid">
+                <div class="expr-field">
+                  <label><KatexMath tex="P(x, y) =" /></label>
+                  <input
+                    v-model="field.exprP"
+                    type="text"
+                    class="mono-input"
+                    @input="field.preset = 'custom'"
+                  />
+                </div>
+                <div class="expr-field">
+                  <label><KatexMath tex="Q(x, y) =" /></label>
+                  <input
+                    v-model="field.exprQ"
+                    type="text"
+                    class="mono-input"
+                    @input="field.preset = 'custom'"
+                  />
+                </div>
+              </div>
+            </template>
+
+            <!-- Scalar Potential Gradient Mode -->
+            <template v-else>
+              <div class="field-row">
+                <label>Potential</label>
+                <select
+                  :value="field.scalarPreset ?? 'bowl'"
+                  class="mini-select"
+                  @change="handleScalarPresetChange(field.id, $event)"
+                >
+                  <option value="bowl">Paraboloid Bowl: (x²+y²)/4</option>
+                  <option value="peak">Gaussian Hill: 3·exp(-(x²+y²)/4)</option>
+                  <option value="saddle">Hyperbolic Saddle: (x²-y²)/4</option>
+                  <option value="waves">Sinusoidal: sin(x)·cos(y)</option>
+                  <option value="custom">Custom Potential f(x, y)</option>
+                </select>
+              </div>
+
               <div class="expr-field">
-                <label><KatexMath tex="P(x, y) =" /></label>
+                <label><KatexMath tex="f(x, y) =" /></label>
                 <input
-                  v-model="field.exprP"
+                  :value="field.exprScalar ?? '(x^2 + y^2) / 4'"
                   type="text"
                   class="mono-input"
-                  @input="field.preset = 'custom'"
+                  @input="setFieldScalarExpr(field, $event)"
                 />
               </div>
-              <div class="expr-field">
-                <label><KatexMath tex="Q(x, y) =" /></label>
+
+              <label class="checkbox-inline">
                 <input
-                  v-model="field.exprQ"
-                  type="text"
-                  class="mono-input"
-                  @input="field.preset = 'custom'"
+                  :checked="field.showContours ?? true"
+                  type="checkbox"
+                  @change="setFieldShowContours(field, $event)"
                 />
+                <span>Show level contours f(x,y) = c</span>
+              </label>
+
+              <div class="scalar-explainer">
+                {{ getScalarPresetDescription(field.scalarPreset) }}
               </div>
+            </template>
+
+            <!-- Calculus Color Heatmap Overlay Selector -->
+            <div class="calculus-overlay-row">
+              <span class="overlay-lbl">Color Heatmap:</span>
+              <div class="overlay-pills">
+                <button
+                  type="button"
+                  class="overlay-pill"
+                  :class="{ active: (field.colorOverlay ?? 'none') === 'none' }"
+                  @click="setFieldOverlay(field, 'none')"
+                >
+                  Off
+                </button>
+                <button
+                  type="button"
+                  class="overlay-pill"
+                  :class="{ active: field.colorOverlay === 'divergence' }"
+                  title="Shade field by local Divergence ∇·F (Teal = Source > 0, Rose = Sink < 0)"
+                  @click="setFieldOverlay(field, 'divergence')"
+                >
+                  Div ∇·F
+                </button>
+                <button
+                  type="button"
+                  class="overlay-pill"
+                  :class="{ active: field.colorOverlay === 'curl' }"
+                  title="Shade field by local 2D Curl (∇×F)_z (Teal = CCW > 0, Rose = CW < 0)"
+                  @click="setFieldOverlay(field, 'curl')"
+                >
+                  Curl ∇×F
+                </button>
+                <button
+                  type="button"
+                  class="overlay-pill"
+                  :class="{ active: field.colorOverlay === 'scalar' }"
+                  :disabled="field.inputMode !== 'scalar-gradient'"
+                  :title="
+                    field.inputMode === 'scalar-gradient'
+                      ? 'Shade field by scalar potential height f(x, y)'
+                      : 'Switch to Scalar f(x,y) → ∇f mode to color by height f'
+                  "
+                  @click="setFieldOverlay(field, 'scalar')"
+                >
+                  Scalar f
+                </button>
+              </div>
+            </div>
+
+            <!-- Live Field Calculus Readout at Origin (0,0) -->
+            <div
+              v-if="evaluatedFieldsById.get(field.id) && !evaluatedFieldsById.get(field.id)?.expressionError"
+              class="calculus-summary"
+            >
+              <div class="calc-row">
+                <span class="calc-key" title="Rate of outward expansion (∂P/∂x + ∂Q/∂y) evaluated at (0,0)">
+                  Div ∇·F <small>(0,0)</small>
+                </span>
+                <span class="calc-vals">
+                  <strong class="calc-num">
+                    {{ formatCalc(evaluatedFieldsById.get(field.id)!.originCalculus.origDiv) }}
+                  </strong>
+                  <span class="calc-badge">
+                    {{ divergenceTag(evaluatedFieldsById.get(field.id)!.originCalculus.origDiv) }}
+                  </span>
+                  <template
+                    v-if="
+                      showTransformedCalculus &&
+                      evaluatedFieldsById.get(field.id)!.originCalculus.transDiv !== null
+                    "
+                  >
+                    <span class="calc-arrow">→</span>
+                    <strong class="calc-num trans">
+                      {{ formatCalc(evaluatedFieldsById.get(field.id)!.originCalculus.transDiv!) }}
+                    </strong>
+                  </template>
+                </span>
+              </div>
+              <div class="calc-row">
+                <span class="calc-key" title="Counterclockwise local rotation (∂Q/∂x - ∂P/∂y) evaluated at (0,0)">
+                  Curl ∇×F <small>(0,0)</small>
+                </span>
+                <span class="calc-vals">
+                  <strong class="calc-num">
+                    {{ formatCalc(evaluatedFieldsById.get(field.id)!.originCalculus.origCurl) }}
+                  </strong>
+                  <span class="calc-badge">
+                    {{ curlTag(evaluatedFieldsById.get(field.id)!.originCalculus.origCurl) }}
+                  </span>
+                  <template
+                    v-if="
+                      showTransformedCalculus &&
+                      evaluatedFieldsById.get(field.id)!.originCalculus.transCurl !== null
+                    "
+                  >
+                    <span class="calc-arrow">→</span>
+                    <strong class="calc-num trans">
+                      {{ formatCalc(evaluatedFieldsById.get(field.id)!.originCalculus.transCurl!) }}
+                    </strong>
+                  </template>
+                </span>
+              </div>
+              <div class="calc-hint">Hover canvas to probe local values at any (x, y).</div>
             </div>
 
             <div
@@ -745,24 +971,41 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
   font-weight: 700;
 }
 
+.field-add-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
 .add-field-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
   width: 100%;
-  padding: 0.45rem;
+  min-width: 0;
+  padding: 0.42rem 0.35rem;
   border-radius: 6px;
   background: rgba(45, 212, 191, 0.12);
   border: 1px solid rgba(45, 212, 191, 0.4);
   color: #2dd4bf;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 600;
   cursor: pointer;
 }
 
 .add-field-btn:hover {
   background: rgba(45, 212, 191, 0.2);
+}
+
+.add-field-btn.scalar {
+  background: rgba(251, 191, 36, 0.11);
+  border-color: rgba(251, 191, 36, 0.42);
+  color: #fbbf24;
+}
+
+.add-field-btn.scalar:hover {
+  background: rgba(251, 191, 36, 0.2);
 }
 
 .panel-scroll {
@@ -1121,5 +1364,151 @@ function handleFieldPresetChange(fieldId: string, event: Event): void {
 
 .mt-xs {
   margin-top: 0.35rem;
+}
+
+.input-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  background: var(--bg-canvas);
+  padding: 0.2rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.mode-pill {
+  padding: 0.28rem 0.3rem;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.69rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mode-pill.active {
+  background: rgba(45, 212, 191, 0.18);
+  color: #2dd4bf;
+}
+
+.scalar-explainer {
+  font-size: 0.69rem;
+  line-height: 1.38;
+  color: var(--text-secondary);
+  background: rgba(251, 191, 36, 0.07);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: 5px;
+  padding: 0.35rem 0.45rem;
+}
+
+.calculus-overlay-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.overlay-lbl {
+  font-size: 0.69rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.overlay-pills {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.overlay-pill {
+  padding: 0.25rem 0.2rem;
+  border-radius: 5px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-canvas);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.overlay-pill.active {
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.16);
+  color: var(--accent-cyan);
+}
+
+.overlay-pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.calculus-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+  padding: 0.42rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.calc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.calc-key {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.calc-key small {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.calc-vals {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.calc-num {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.calc-num.trans {
+  color: var(--accent-cyan);
+}
+
+.calc-badge {
+  font-size: 0.63rem;
+  padding: 0.06rem 0.3rem;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-secondary);
+}
+
+.calc-arrow {
+  color: var(--text-muted);
+}
+
+.calc-hint {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-style: italic;
 }
 </style>

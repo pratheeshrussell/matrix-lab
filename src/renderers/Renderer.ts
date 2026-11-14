@@ -12,6 +12,7 @@ export interface RendererInteractionCallbacks {
   onPointDrag?: (objectId: string, newPos: Vec2) => void
   onVectorTipDrag?: (objectId: string, newTipPos: Vec2) => void
   onCanvasSeedClick?: (pos: Vec2, keepMode?: boolean) => void
+  onCanvasPointerMove?: (pos: Vec2 | null) => void
 }
 
 /**

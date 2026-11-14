@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { Vec2 } from '../../domain/math/Vector2'
 import { EDUCATIONAL_PRESETS } from '../../engine/educationalPresets'
 import { ParticleFlowEngine } from '../../engine/FlowSimulation'
+import { probeVectorFieldAt } from '../../engine/VectorFieldEvaluator'
 import { JSXGraphRenderer } from '../../renderers/JSXGraphRenderer'
 import { useSceneStore } from '../../stores/sceneStore'
 import { useTransformationStore } from '../../stores/transformationStore'
@@ -17,6 +19,7 @@ const showExperimentBanner = ref(true)
 const isPlayingMorph = ref(false)
 const isFlowPlaying = ref(false)
 const isSeedMode = ref(false)
+const hoverWorldPos = ref<Vec2 | null>(null)
 
 let resizeObserver: ResizeObserver | null = null
 let morphFrameId: number | null = null
@@ -27,6 +30,68 @@ let lastFlowFrameTime = 0
 const hasVisibleVectorField = computed(() =>
   sceneStore.vectorFields.some((f) => f.visible),
 )
+
+const activeVisibleField = computed(
+  () =>
+    sceneStore.vectorFields.find((f) => f.visible && f.id === sceneStore.selectedObjectId) ??
+    sceneStore.vectorFields.find((f) => f.visible) ??
+    null,
+)
+
+const activeHeatmapField = computed(
+  () =>
+    sceneStore.vectorFields.find((f) => f.visible && (f.colorOverlay ?? 'none') !== 'none') ??
+    null,
+)
+
+const activeFieldProbe = computed(() => {
+  if (!hoverWorldPos.value || !activeVisibleField.value) return null
+  return probeVectorFieldAt(
+    activeVisibleField.value,
+    hoverWorldPos.value,
+    transformStore.evaluatedScene.activeCompositeMatrix,
+    transformStore.vectorFieldMode,
+  )
+})
+
+const probeReadout = computed(() => {
+  const p = activeFieldProbe.value
+  if (!p) return null
+  const isOrigOnly = transformStore.visualizationMode === 'original'
+  const vec = isOrigOnly ? p.origVector : (p.transVector ?? p.origVector)
+  const div = isOrigOnly ? p.origDivergence : (p.transDivergence ?? p.origDivergence)
+  const curl = isOrigOnly ? p.origCurl : (p.transCurl ?? p.origCurl)
+  const scalar = isOrigOnly ? p.origScalar : (p.transScalar ?? p.origScalar)
+  return {
+    x: formatProbeNum(p.position[0]),
+    y: formatProbeNum(p.position[1]),
+    vecLabel: isOrigOnly ? 'F' : p.transVector ? "F'" : 'F',
+    vx: vec ? formatProbeNum(vec[0]) : '—',
+    vy: vec ? formatProbeNum(vec[1]) : '—',
+    divText: div !== null ? formatProbeNum(div) : '—',
+    divTag: div !== null ? divStatusLabel(div) : '',
+    curlText: curl !== null ? formatProbeNum(curl) : '—',
+    curlTag: curl !== null ? curlStatusLabel(curl) : '',
+    scalarText: p.inputMode === 'scalar-gradient' && scalar !== null ? formatProbeNum(scalar) : null,
+  }
+})
+
+function formatProbeNum(val: number): string {
+  if (Math.abs(val) < 1e-4) return '0'
+  return val.toFixed(2)
+}
+
+function divStatusLabel(val: number): string {
+  if (val > 0.05) return 'Source'
+  if (val < -0.05) return 'Sink'
+  return '0'
+}
+
+function curlStatusLabel(val: number): string {
+  if (val > 0.05) return 'CCW'
+  if (val < -0.05) return 'CW'
+  return '0'
+}
 
 const activeExperiment = computed(() =>
   EDUCATIONAL_PRESETS.find((p) => p.id === transformStore.activeEducationalPresetId),
@@ -193,6 +258,9 @@ onMounted(() => {
       if (isSeedMode.value && !keepMode) {
         setSeedMode(false)
       }
+    },
+    onCanvasPointerMove: (pos) => {
+      hoverWorldPos.value = pos
     },
   })
   window.addEventListener('keydown', handleWindowKeyDown)
@@ -379,73 +447,111 @@ onBeforeUnmount(() => {
       <!-- JSXGraph Interactive Board -->
       <div ref="boardContainerRef" class="jsxgraph-canvas" />
 
-      <!-- Floating View Controls (Zoom / Reset / Clear) -->
-      <div class="canvas-controls">
-        <button type="button" class="ctrl-btn" title="Zoom In" @click="renderer.zoomIn()">+</button>
-        <button type="button" class="ctrl-btn" title="Zoom Out" @click="renderer.zoomOut()">−</button>
-        <button type="button" class="ctrl-btn reset-btn" title="Reset View to [-5.5, 5.5]" @click="renderer.resetView()">
-          Reset View
-        </button>
-        <button
-          v-if="sceneStore.vectorFields.length > 0"
-          type="button"
-          class="ctrl-btn clear-ctrl-btn"
-          title="Remove vector fields from the canvas"
-          @click="sceneStore.clearVectorFields()"
-        >
-          Clear Field
-        </button>
-        <button
-          v-if="sceneStore.objects.length > 0"
-          type="button"
-          class="ctrl-btn clear-ctrl-btn"
-          title="Clear all objects and fields from the canvas"
-          @click="sceneStore.clearScene()"
-        >
-          Clear All
-        </button>
-        <button
-          v-if="!showExperimentBanner"
-          type="button"
-          class="ctrl-btn reset-btn"
-          @click="showExperimentBanner = true"
-        >
-          ? Guide
-        </button>
-      </div>
-
-      <!-- Floating Visual Legend -->
-      <div class="canvas-legend">
-        <div class="legend-item">
-          <span class="legend-line dashed" />
-          <span>Original (<KatexMath tex="\mathbf{x}" />)</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-line solid" />
-          <span>Transformed (<KatexMath tex="M\mathbf{x}" />)</span>
-        </div>
-        <div v-if="transformStore.showTransformedGrid" class="legend-item">
-          <span class="legend-line warped" />
-          <span>Warped Grid</span>
-        </div>
-        <div v-if="transformStore.showSvd" class="legend-item">
-          <span class="legend-line svd" />
-          <span>SVD Ellipse</span>
-        </div>
+      <!-- Bottom HUD: Probe Pill, Visual Legend & Floating Controls (zero-overlap responsive stack) -->
+      <div class="board-bottom-hud">
         <div
-          v-if="transformStore.showSubspaces && transformStore.evaluatedScene.activeStepAnalysis.rank < 2"
-          class="legend-item"
+          v-if="probeReadout && !singularFieldWarning"
+          class="field-probe-pill"
+          role="status"
+          aria-live="polite"
         >
-          <span class="legend-line col-space" />
-          <span>Col(M)</span>
-          <span class="legend-line null-space" />
-          <span>Null(M)</span>
+          <span class="probe-chip">
+            (<strong>{{ probeReadout.x }}</strong>, <strong>{{ probeReadout.y }}</strong>)
+          </span>
+          <span class="probe-chip">
+            {{ probeReadout.vecLabel }} = ({{ probeReadout.vx }}, {{ probeReadout.vy }})
+          </span>
+          <span class="probe-chip">
+            Div: <strong>{{ probeReadout.divText }}</strong>
+            <small v-if="probeReadout.divTag">({{ probeReadout.divTag }})</small>
+          </span>
+          <span class="probe-chip">
+            Curl: <strong>{{ probeReadout.curlText }}</strong>
+            <small v-if="probeReadout.curlTag">({{ probeReadout.curlTag }})</small>
+          </span>
+          <span v-if="probeReadout.scalarText !== null" class="probe-chip scalar">
+            f = <strong>{{ probeReadout.scalarText }}</strong>
+          </span>
         </div>
-        <div v-if="transformStore.showBasisVectors" class="legend-item">
-          <span class="legend-dot e1" />
-          <span><KatexMath tex="\mathbf{e}_1" /></span>
-          <span class="legend-dot e2" />
-          <span><KatexMath tex="\mathbf{e}_2" /></span>
+
+        <div class="hud-bottom-row">
+          <div class="canvas-legend">
+            <div class="legend-item">
+              <span class="legend-line dashed" />
+              <span>Original (<KatexMath tex="\mathbf{x}" />)</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-line solid" />
+              <span>Transformed (<KatexMath tex="M\mathbf{x}" />)</span>
+            </div>
+            <div v-if="transformStore.showTransformedGrid" class="legend-item">
+              <span class="legend-line warped" />
+              <span>Warped Grid</span>
+            </div>
+            <div v-if="transformStore.showSvd" class="legend-item">
+              <span class="legend-line svd" />
+              <span>SVD Ellipse</span>
+            </div>
+            <div
+              v-if="transformStore.showSubspaces && transformStore.evaluatedScene.activeStepAnalysis.rank < 2"
+              class="legend-item"
+            >
+              <span class="legend-line col-space" />
+              <span>Col(M)</span>
+              <span class="legend-line null-space" />
+              <span>Null(M)</span>
+            </div>
+            <div v-if="transformStore.showBasisVectors" class="legend-item">
+              <span class="legend-dot e1" />
+              <span><KatexMath tex="\mathbf{e}_1" /></span>
+              <span class="legend-dot e2" />
+              <span><KatexMath tex="\mathbf{e}_2" /></span>
+            </div>
+            <div v-if="activeHeatmapField" class="legend-item">
+              <span
+                class="heatmap-swatch"
+                :class="activeHeatmapField.colorOverlay === 'scalar' ? 'scalar' : 'calc'"
+              />
+              <span v-if="activeHeatmapField.colorOverlay === 'scalar'">Low f ↔ Peak f</span>
+              <span v-else-if="activeHeatmapField.colorOverlay === 'divergence'">Sink ↔ Source</span>
+              <span v-else>CW ↔ CCW</span>
+            </div>
+          </div>
+
+          <!-- Floating View Controls (Zoom / Reset / Clear) -->
+          <div class="canvas-controls">
+            <button type="button" class="ctrl-btn" title="Zoom In" @click="renderer.zoomIn()">+</button>
+            <button type="button" class="ctrl-btn" title="Zoom Out" @click="renderer.zoomOut()">−</button>
+            <button type="button" class="ctrl-btn reset-btn" title="Reset View to [-5.5, 5.5]" @click="renderer.resetView()">
+              Reset View
+            </button>
+            <button
+              v-if="sceneStore.vectorFields.length > 0"
+              type="button"
+              class="ctrl-btn clear-ctrl-btn"
+              title="Remove vector fields from the canvas"
+              @click="sceneStore.clearVectorFields()"
+            >
+              Clear Field
+            </button>
+            <button
+              v-if="sceneStore.objects.length > 0"
+              type="button"
+              class="ctrl-btn clear-ctrl-btn"
+              title="Clear all objects and fields from the canvas"
+              @click="sceneStore.clearScene()"
+            >
+              Clear All
+            </button>
+            <button
+              v-if="!showExperimentBanner"
+              type="button"
+              class="ctrl-btn reset-btn"
+              @click="showExperimentBanner = true"
+            >
+              ? Guide
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -478,7 +584,8 @@ onBeforeUnmount(() => {
 .morph-controls {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 .morph-play-btn {
@@ -517,7 +624,7 @@ onBeforeUnmount(() => {
 }
 
 .morph-slider {
-  width: 140px;
+  width: clamp(72px, 10vw, 140px);
   accent-color: var(--accent-cyan);
   cursor: pointer;
 }
@@ -546,6 +653,7 @@ onBeforeUnmount(() => {
 .flow-controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.38rem;
 }
 
@@ -705,18 +813,39 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.canvas-controls {
+.board-bottom-hud {
   position: absolute;
   bottom: 0.75rem;
+  left: 0.75rem;
   right: 0.75rem;
   z-index: 5;
   display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  pointer-events: none;
+}
+
+.hud-bottom-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.canvas-controls {
+  margin-left: auto;
+  flex: 0 1 auto;
+  max-width: 100%;
+  display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.35rem;
   background: rgba(15, 23, 42, 0.88);
   padding: 0.3rem;
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
+  pointer-events: auto;
 }
 
 .ctrl-btn {
@@ -751,20 +880,61 @@ onBeforeUnmount(() => {
   background: rgba(244, 63, 94, 0.16);
 }
 
-.canvas-legend {
-  position: absolute;
-  bottom: 0.75rem;
-  left: 0.75rem;
-  z-index: 5;
+.field-probe-pill {
+  align-self: flex-start;
   display: flex;
   align-items: center;
-  gap: 0.8rem;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 8px;
+  padding: 0.32rem 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  color: var(--text-secondary);
+}
+
+.probe-chip strong {
+  color: var(--text-primary);
+}
+
+.probe-chip small {
+  color: var(--text-muted);
+  margin-left: 0.2rem;
+}
+
+.probe-chip.scalar strong {
+  color: #fbbf24;
+}
+
+.canvas-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
   background: rgba(15, 23, 42, 0.88);
   padding: 0.35rem 0.65rem;
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
   font-size: 0.72rem;
   color: var(--text-secondary);
+  pointer-events: auto;
+}
+
+.heatmap-swatch {
+  width: 22px;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.heatmap-swatch.calc {
+  background: linear-gradient(90deg, #f43f5e, #94a3b8, #2dd4bf);
+}
+
+.heatmap-swatch.scalar {
+  background: linear-gradient(90deg, #38bdf8, #94a3b8, #fbbf24);
 }
 
 .legend-item {

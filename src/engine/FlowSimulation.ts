@@ -1,4 +1,3 @@
-import { compileMathExpression } from '../domain/math/ExpressionParser'
 import {
   IDENTITY_MAT2,
   inverseMat2,
@@ -8,8 +7,9 @@ import {
 import type { VectorFieldTransformMode } from '../domain/math/Transform'
 import { isFiniteVec2, normVec2, type Vec2 } from '../domain/math/Vector2'
 import type { VectorFieldDomain, VectorFieldSceneObject } from '../domain/scene/SceneObject'
+import { compileFieldDefinition, type VectorSamplerFn } from './VectorFieldEvaluator'
 
-export type VectorSamplerFn = (pt: Vec2) => Vec2 | null
+export type { VectorSamplerFn }
 
 export interface CompiledFieldSamplers {
   valid: boolean
@@ -39,9 +39,9 @@ const BASE_PARTICLES_PER_FIELD = 56
 const MAX_PARTICLE_SPEED = 5.5
 
 /**
- * Compiles P(x,y) and Q(x,y) once and creates continuous evaluation functions
- * for both the original vector field F(x) and the transformed vector field
- * according to the active transformation mode:
+ * Compiles P(x,y)/Q(x,y) or scalar potential ∇f(x,y) once and creates continuous
+ * evaluation functions for both the original vector field F(x) and the transformed
+ * vector field according to the active transformation mode:
  * - 'fixed-samples': G(x) = A * F(x)
  * - 'pushforward':   F'(x') = A * F(A^-1 * x') (null if A is singular)
  */
@@ -50,10 +50,9 @@ export function createVectorFieldSamplers(
   matrix: Mat2 = IDENTITY_MAT2,
   mode: VectorFieldTransformMode = 'pushforward',
 ): CompiledFieldSamplers {
-  const compiledP = compileMathExpression(field.exprP, ['x', 'y'])
-  const compiledQ = compileMathExpression(field.exprQ, ['x', 'y'])
+  const compiled = compileFieldDefinition(field)
 
-  if (!compiledP.ok || !compiledQ.ok) {
+  if (!compiled.ok) {
     return {
       valid: false,
       evalOriginal: () => null,
@@ -64,12 +63,7 @@ export function createVectorFieldSamplers(
     }
   }
 
-  const evalOriginal: VectorSamplerFn = (pt: Vec2): Vec2 | null => {
-    const vx = compiledP.evaluate({ x: pt[0], y: pt[1] })
-    const vy = compiledQ.evaluate({ x: pt[0], y: pt[1] })
-    const v: Vec2 = [vx, vy]
-    return isFiniteVec2(v) ? v : null
-  }
+  const evalOriginal = compiled.evalVector
 
   let evalTransformed: VectorSamplerFn | null = null
   if (mode === 'fixed-samples') {
@@ -323,7 +317,7 @@ export class ParticleFlowEngine {
       const samplers = createVectorFieldSamplers(field, matrix, mode)
       if (!samplers.valid) continue
 
-      const sig = `${field.id}|${field.exprP}|${field.exprQ}|${field.domain.xMin},${field.domain.xMax},${field.domain.yMin},${field.domain.yMax}`
+      const sig = `${field.id}|${field.inputMode ?? 'vector'}|${field.exprP}|${field.exprQ}|${field.exprScalar ?? ''}|${field.domain.xMin},${field.domain.xMax},${field.domain.yMin},${field.domain.yMax}`
       const existing = this.groups.find((g) => g.signature === sig)
 
       if (existing) {

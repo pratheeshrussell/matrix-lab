@@ -2,9 +2,12 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { Vec2 } from '../domain/math/Vector2'
 import {
+  SCALAR_FIELD_PRESETS,
   VECTOR_FIELD_PRESETS,
   type GeometricSceneObject,
+  type ScalarFieldPresetId,
   type SceneObject,
+  type VectorFieldInputMode,
   type VectorFieldPresetId,
   type VectorFieldSceneObject,
 } from '../domain/scene/SceneObject'
@@ -177,6 +180,11 @@ export const useSceneStore = defineStore('scene', () => {
           preset: 'rotational',
           exprP: '-y',
           exprQ: 'x',
+          inputMode: 'vector',
+          scalarPreset: 'bowl',
+          exprScalar: '(x^2 + y^2) / 4',
+          colorOverlay: 'none',
+          showContours: true,
           visible: true,
           style: { color: '#2dd4bf', fillOpacity: 0, strokeWidth: 1.8 },
           domain: { xMin: -4, xMax: 4, yMin: -4, yMax: 4 },
@@ -191,6 +199,34 @@ export const useSceneStore = defineStore('scene', () => {
     objects.value.push(newObj)
     selectedObjectId.value = newObj.id
     return newObj
+  }
+
+  function addScalarGradientField(): VectorFieldSceneObject {
+    const preset = SCALAR_FIELD_PRESETS.bowl
+    const newField: VectorFieldSceneObject = {
+      id: generateId('field'),
+      name: 'Scalar Potential ∇f (Bowl)',
+      category: 'field',
+      type: 'vector-field',
+      preset: 'custom',
+      exprP: preset.exprP,
+      exprQ: preset.exprQ,
+      inputMode: 'scalar-gradient',
+      scalarPreset: 'bowl',
+      exprScalar: preset.exprScalar,
+      colorOverlay: 'scalar',
+      showContours: true,
+      visible: true,
+      style: { color: '#2dd4bf', fillOpacity: 0, strokeWidth: 1.8 },
+      domain: { xMin: -4, xMax: 4, yMin: -4, yMax: 4 },
+      stepsX: 9,
+      stepsY: 9,
+      arrowScale: 0.22,
+      normalizeArrows: false,
+    }
+    objects.value.push(newField)
+    selectedObjectId.value = newField.id
+    return newField
   }
 
   function removeObject(id: string): void {
@@ -231,6 +267,44 @@ export const useSceneStore = defineStore('scene', () => {
       obj.exprP = def.exprP
       obj.exprQ = def.exprQ
       obj.name = def.label
+    }
+  }
+
+  function setFieldInputMode(fieldId: string, mode: VectorFieldInputMode): void {
+    const obj = objects.value.find(
+      (o): o is VectorFieldSceneObject => o.id === fieldId && o.type === 'vector-field',
+    )
+    if (!obj) return
+    obj.inputMode = mode
+    if (mode === 'scalar-gradient') {
+      const presetKey =
+        obj.scalarPreset && obj.scalarPreset !== 'custom' ? obj.scalarPreset : 'bowl'
+      obj.scalarPreset = obj.scalarPreset ?? 'bowl'
+      if (!obj.exprScalar) {
+        obj.exprScalar = SCALAR_FIELD_PRESETS[presetKey].exprScalar
+      }
+      if (!obj.colorOverlay || obj.colorOverlay === 'none') {
+        obj.colorOverlay = 'scalar'
+      }
+      obj.showContours = obj.showContours ?? true
+    } else if (obj.colorOverlay === 'scalar') {
+      obj.colorOverlay = 'none'
+    }
+  }
+
+  function applyScalarFieldPreset(fieldId: string, preset: ScalarFieldPresetId): void {
+    const obj = objects.value.find(
+      (o): o is VectorFieldSceneObject => o.id === fieldId && o.type === 'vector-field',
+    )
+    if (!obj) return
+    obj.scalarPreset = preset
+    obj.inputMode = 'scalar-gradient'
+    if (preset !== 'custom') {
+      const def = SCALAR_FIELD_PRESETS[preset]
+      obj.exprScalar = def.exprScalar
+      obj.exprP = def.exprP
+      obj.exprQ = def.exprQ
+      obj.name = `∇f: ${def.label}`
     }
   }
 
@@ -279,10 +353,13 @@ export const useSceneStore = defineStore('scene', () => {
     geometricObjects,
     vectorFields,
     addObject,
+    addScalarGradientField,
     removeObject,
     duplicateObject,
     toggleVisibility,
     applyVectorFieldPreset,
+    setFieldInputMode,
+    applyScalarFieldPreset,
     setSceneObjects,
     clearScene,
     clearVectorFields,

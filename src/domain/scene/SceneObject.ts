@@ -78,6 +78,9 @@ export type GeometricSceneObject =
   | CurveSceneObject
 
 export type VectorFieldPresetId = 'radial' | 'rotational' | 'saddle' | 'constant' | 'custom'
+export type VectorFieldInputMode = 'vector' | 'scalar-gradient'
+export type ScalarFieldPresetId = 'bowl' | 'peak' | 'saddle' | 'waves' | 'custom'
+export type FieldColorOverlayMode = 'none' | 'divergence' | 'curl' | 'scalar'
 
 export interface VectorFieldDomain {
   xMin: number
@@ -88,7 +91,7 @@ export interface VectorFieldDomain {
 
 /**
  * First-class mathematical vector field object:
- *   F(x, y) = (P(x, y), Q(x, y))
+ *   F(x, y) = (P(x, y), Q(x, y))  or  F(x, y) = ∇f(x, y)
  * Stored by its mathematical definition and sampling parameters, never as static arrows.
  */
 export interface VectorFieldSceneObject extends BaseSceneObject {
@@ -97,6 +100,12 @@ export interface VectorFieldSceneObject extends BaseSceneObject {
   preset: VectorFieldPresetId
   exprP: string
   exprQ: string
+  /** Optional input mode ('vector' for (P, Q), 'scalar-gradient' for ∇f) */
+  inputMode?: VectorFieldInputMode
+  scalarPreset?: ScalarFieldPresetId
+  exprScalar?: string
+  colorOverlay?: FieldColorOverlayMode
+  showContours?: boolean
   domain: VectorFieldDomain
   stepsX: number
   stepsY: number
@@ -105,6 +114,46 @@ export interface VectorFieldSceneObject extends BaseSceneObject {
 }
 
 export type SceneObject = GeometricSceneObject | VectorFieldSceneObject
+
+export const SCALAR_FIELD_PRESETS: Record<
+  Exclude<ScalarFieldPresetId, 'custom'>,
+  {
+    label: string
+    exprScalar: string
+    exprP: string
+    exprQ: string
+    description: string
+  }
+> = {
+  bowl: {
+    label: 'Paraboloid Bowl (Minimum)',
+    exprScalar: '(x^2 + y^2) / 4',
+    exprP: 'x / 2',
+    exprQ: 'y / 2',
+    description: 'Valley at origin — ∇f points radially outward uphill (Source: ∇·F = 1, Curl = 0)',
+  },
+  peak: {
+    label: 'Gaussian Hill (Peak)',
+    exprScalar: '3 * exp(-(x^2 + y^2) / 4)',
+    exprP: '-1.5 * x * exp(-(x^2 + y^2) / 4)',
+    exprQ: '-1.5 * y * exp(-(x^2 + y^2) / 4)',
+    description: 'Summit at origin — ∇f points radially inward uphill toward peak (Sink near peak, Curl = 0)',
+  },
+  saddle: {
+    label: 'Hyperbolic Saddle Pass',
+    exprScalar: '(x^2 - y^2) / 4',
+    exprP: 'x / 2',
+    exprQ: '-y / 2',
+    description: 'Uphill along x, downhill along y — harmonic potential (∇·F = 0, Curl = 0)',
+  },
+  waves: {
+    label: 'Sinusoidal Hills & Valleys',
+    exprScalar: 'sin(x) * cos(y)',
+    exprP: 'cos(x) * cos(y)',
+    exprQ: '-sin(x) * sin(y)',
+    description: 'Alternating peaks and troughs — ∇f climbs perpendicular to level contours',
+  },
+}
 
 export const VECTOR_FIELD_PRESETS: Record<
   Exclude<VectorFieldPresetId, 'custom'>,

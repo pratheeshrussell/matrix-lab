@@ -118,6 +118,20 @@ export class JSXGraphRenderer implements Renderer {
     this.callbacks.onCanvasSeedClick([coords[0], coords[1]], e.shiftKey)
   }
 
+  private readonly handleCanvasPointerMove = (e: PointerEvent): void => {
+    if (!this.board || !this.callbacks.onCanvasPointerMove) return
+    const coords = this.board.getUsrCoordsOfMouse(e)
+    if (Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+      this.callbacks.onCanvasPointerMove([coords[0], coords[1]])
+    } else {
+      this.callbacks.onCanvasPointerMove(null)
+    }
+  }
+
+  private readonly handleCanvasPointerLeave = (): void => {
+    this.callbacks.onCanvasPointerMove?.(null)
+  }
+
   public initialize(
     container: HTMLElement,
     initialBox: WorldBoundingBox = DEFAULT_BOUNDING_BOX,
@@ -132,6 +146,8 @@ export class JSXGraphRenderer implements Renderer {
     window.addEventListener('keyup', this.handleKeyUp)
     container.addEventListener('dblclick', this.handleCanvasDoubleClick)
     container.addEventListener('pointerdown', this.handleCanvasPointerDown, true)
+    container.addEventListener('pointermove', this.handleCanvasPointerMove)
+    container.addEventListener('pointerleave', this.handleCanvasPointerLeave)
 
     this.board = JXG.JSXGraph.initBoard(container, {
       boundingbox: [...initialBox],
@@ -324,6 +340,14 @@ export class JSXGraphRenderer implements Renderer {
       // 1.2. Fundamental subspaces Col(M) & Null(M) when singular (rank < 2)
       if (scene.options.showSubspaces && showTransformed) {
         this.renderSubspaces(scene)
+      }
+
+      // 1.3. Scalar potential level contours f(x, y) = c (behind streamlines and arrows)
+      for (const field of scene.originalFields) {
+        if (!field.visible || field.inputMode !== 'scalar-gradient' || !field.showContours) {
+          continue
+        }
+        this.renderScalarContours(field, showOriginal, showTransformed, isOverlayComparison)
       }
 
       // 1.5. Vector field streamlines (RK4 integral curves behind arrows)
@@ -941,6 +965,64 @@ export class JSXGraphRenderer implements Renderer {
     }
   }
 
+  private renderScalarContours(
+    field: EvaluatedVectorField,
+    showOriginal: boolean,
+    showTransformed: boolean,
+    isOverlayComparison: boolean,
+  ): void {
+    if (!this.board) return
+
+    const drawSegments = (
+      segments: readonly Vec2[][],
+      strokeColor: string,
+      strokeWidth: number,
+      strokeOpacity: number,
+      dash: number,
+    ): void => {
+      if (!this.board || segments.length === 0) return
+      const xs: number[] = []
+      const ys: number[] = []
+      for (const seg of segments) {
+        for (const pt of seg) {
+          xs.push(pt[0])
+          ys.push(pt[1])
+        }
+        xs.push(Number.NaN)
+        ys.push(Number.NaN)
+      }
+      if (xs.length === 0) return
+      const curve = this.board.create('curve', [xs, ys], {
+        strokeColor,
+        strokeWidth,
+        strokeOpacity,
+        dash,
+        fixed: true,
+        highlight: false,
+        layer: 2,
+      })
+      this.trackElement(curve)
+    }
+
+    if (showOriginal && field.originalContourPaths.length > 0) {
+      drawSegments(
+        field.originalContourPaths,
+        isOverlayComparison ? '#94a3b8' : '#38bdf8',
+        isOverlayComparison ? 1.25 : 1.5,
+        isOverlayComparison ? 0.36 : 0.62,
+        isOverlayComparison ? 2 : 0,
+      )
+    }
+
+    if (
+      showTransformed &&
+      !field.singularPushforwardUnavailable &&
+      field.transformedContourPaths.length > 0
+    ) {
+      drawSegments(field.transformedContourPaths, '#fbbf24', 1.55, 0.56, 0)
+    }
+  }
+
   private renderVectorFieldSamples(
     field: EvaluatedVectorField,
     samples: readonly EvaluatedVectorSample[],
@@ -948,56 +1030,101 @@ export class JSXGraphRenderer implements Renderer {
   ): void {
     if (!this.board || samples.length === 0) return
 
-    const xs: number[] = []
-    const ys: number[] = []
+    const canColorHeatmap =
+      !style.isOriginalInOverlay &&
+      field.colorOverlay !== 'none' &&
+      (field.colorOverlay !== 'scalar' || field.scalarRange !== null)
 
-    for (const sample of samples) {
-      const [x0, y0] = sample.position
-      const [dx, dy] = sample.displayDelta
-      const len = Math.hypot(dx, dy)
-      if (len < 1e-5) continue
+    if (!canColorHeatmap) {
+      const xs: number[] = []
+      const ys: number[] = []
+      for (const sample of samples) {
+        appendSampleArrow(sample, xs, ys)
+      }
+      if (xs.length === 0) return
 
-      const x1 = x0 + dx
-      const y1 = y0 + dy
+      const strokeColor = style.isOriginalInOverlay ? '#64748b' : field.color
+      const strokeOpacity = style.isOriginalInOverlay ? 0.45 : 0.92
+      const strokeWidth = style.isOriginalInOverlay
+        ? Math.max(1.1, field.strokeWidth * 0.75)
+        : field.strokeWidth
 
-      // Arrow shaft
-      xs.push(x0, x1, Number.NaN)
-      ys.push(y0, y1, Number.NaN)
-
-      // Arrowhead wings
-      const ux = dx / len
-      const uy = dy / len
-      const nx = -uy
-      const ny = ux
-      const headLen = Math.min(len * 0.34, 0.22)
-      const headHalfWidth = headLen * 0.52
-
-      const leftX = x1 - ux * headLen + nx * headHalfWidth
-      const leftY = y1 - uy * headLen + ny * headHalfWidth
-      const rightX = x1 - ux * headLen - nx * headHalfWidth
-      const rightY = y1 - uy * headLen - ny * headHalfWidth
-
-      xs.push(leftX, x1, rightX, Number.NaN)
-      ys.push(leftY, y1, rightY, Number.NaN)
+      const fieldCurve = this.board.create('curve', [xs, ys], {
+        strokeColor,
+        strokeOpacity,
+        strokeWidth,
+        dash: style.isOriginalInOverlay ? 1 : 0,
+        fixed: true,
+        highlight: false,
+      })
+      this.trackElement(fieldCurve)
+      return
     }
 
-    if (xs.length === 0) return
+    // Heatmap color-banded rendering for divergence, curl, or scalar potential
+    const bandColors =
+      field.colorOverlay === 'scalar'
+        ? ['#38bdf8', '#60a5fa', '#94a3b8', '#f59e0b', '#fbbf24']
+        : ['#f43f5e', '#fb7185', '#94a3b8', '#38bdf8', '#2dd4bf']
 
-    const strokeColor = style.isOriginalInOverlay ? '#64748b' : field.color
-    const strokeOpacity = style.isOriginalInOverlay ? 0.45 : 0.92
-    const strokeWidth = style.isOriginalInOverlay
-      ? Math.max(1.1, field.strokeWidth * 0.75)
-      : field.strokeWidth
+    const haloX: number[][] = [[], [], [], [], []]
+    const haloY: number[][] = [[], [], [], [], []]
+    const arrowX: number[][] = [[], [], [], [], []]
+    const arrowY: number[][] = [[], [], [], [], []]
 
-    const fieldCurve = this.board.create('curve', [xs, ys], {
-      strokeColor,
-      strokeOpacity,
-      strokeWidth,
-      dash: style.isOriginalInOverlay ? 1 : 0,
-      fixed: true,
-      highlight: false,
-    })
-    this.trackElement(fieldCurve)
+    const [halfW, halfH] = estimateHeatmapCellHalfSize(samples)
+
+    for (const sample of samples) {
+      const u = normalizeOverlayValue(sample, field)
+      const bandIdx = u < -0.45 ? 0 : u < -0.1 ? 1 : u <= 0.1 ? 2 : u <= 0.45 ? 3 : 4
+      const [x0, y0] = sample.position
+
+      haloX[bandIdx]!.push(
+        x0 - halfW,
+        x0 + halfW,
+        x0 + halfW,
+        x0 - halfW,
+        x0 - halfW,
+        Number.NaN,
+      )
+      haloY[bandIdx]!.push(
+        y0 - halfH,
+        y0 - halfH,
+        y0 + halfH,
+        y0 + halfH,
+        y0 - halfH,
+        Number.NaN,
+      )
+
+      appendSampleArrow(sample, arrowX[bandIdx]!, arrowY[bandIdx]!)
+    }
+
+    for (let b = 0; b < 5; b++) {
+      const bandColor = bandColors[b]!
+      if (haloX[b]!.length > 0) {
+        const tileCurve = this.board.create('curve', [haloX[b]!, haloY[b]!], {
+          strokeWidth: 0,
+          strokeOpacity: 0,
+          fillColor: bandColor,
+          fillOpacity: b === 2 ? 0.06 : 0.16,
+          fixed: true,
+          highlight: false,
+          layer: 1,
+        })
+        this.trackElement(tileCurve)
+      }
+
+      if (arrowX[b]!.length > 0) {
+        const bandArrows = this.board.create('curve', [arrowX[b]!, arrowY[b]!], {
+          strokeColor: bandColor,
+          strokeOpacity: 0.95,
+          strokeWidth: field.strokeWidth,
+          fixed: true,
+          highlight: false,
+        })
+        this.trackElement(bandArrows)
+      }
+    }
   }
 
   private renderGeometryItem(item: EvaluatedGeometryItem, style: GeometryRenderStyle): void {
@@ -1313,6 +1440,8 @@ export class JSXGraphRenderer implements Renderer {
     if (this.container) {
       this.container.removeEventListener('dblclick', this.handleCanvasDoubleClick)
       this.container.removeEventListener('pointerdown', this.handleCanvasPointerDown, true)
+      this.container.removeEventListener('pointermove', this.handleCanvasPointerMove)
+      this.container.removeEventListener('pointerleave', this.handleCanvasPointerLeave)
       this.container.style.cursor = ''
     }
     this.createdElements = []
@@ -1344,4 +1473,73 @@ function buildHeadDiamonds(
     outY.push(y, y + r, y, y - r, y, Number.NaN)
   }
   return [outX, outY]
+}
+
+function appendSampleArrow(sample: EvaluatedVectorSample, xs: number[], ys: number[]): void {
+  const [x0, y0] = sample.position
+  const [dx, dy] = sample.displayDelta
+  const len = Math.hypot(dx, dy)
+  if (len < 1e-5) return
+
+  const x1 = x0 + dx
+  const y1 = y0 + dy
+
+  xs.push(x0, x1, Number.NaN)
+  ys.push(y0, y1, Number.NaN)
+
+  const ux = dx / len
+  const uy = dy / len
+  const nx = -uy
+  const ny = ux
+  const headLen = Math.min(len * 0.34, 0.22)
+  const headHalfWidth = headLen * 0.52
+
+  const leftX = x1 - ux * headLen + nx * headHalfWidth
+  const leftY = y1 - uy * headLen + ny * headHalfWidth
+  const rightX = x1 - ux * headLen - nx * headHalfWidth
+  const rightY = y1 - uy * headLen - ny * headHalfWidth
+
+  xs.push(leftX, x1, rightX, Number.NaN)
+  ys.push(leftY, y1, rightY, Number.NaN)
+}
+
+function normalizeOverlayValue(
+  sample: EvaluatedVectorSample,
+  field: EvaluatedVectorField,
+): number {
+  if (field.colorOverlay === 'divergence') {
+    const scale = Math.max(0.5, field.maxAbsDivergence)
+    return Math.max(-1, Math.min(1, sample.divergence / scale))
+  }
+  if (field.colorOverlay === 'curl') {
+    const scale = Math.max(0.5, field.maxAbsCurl)
+    return Math.max(-1, Math.min(1, sample.curl / scale))
+  }
+  if (field.colorOverlay === 'scalar' && sample.scalarValue !== null && field.scalarRange) {
+    const [sMin, sMax] = field.scalarRange
+    const span = sMax - sMin
+    if (span < 1e-6) return 0
+    return Math.max(-1, Math.min(1, ((sample.scalarValue - sMin) / span) * 2 - 1))
+  }
+  return 0
+}
+
+function estimateHeatmapCellHalfSize(samples: readonly EvaluatedVectorSample[]): [number, number] {
+  if (samples.length < 4) return [0.35, 0.35]
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (const s of samples) {
+    if (s.position[0] < minX) minX = s.position[0]
+    if (s.position[0] > maxX) maxX = s.position[0]
+    if (s.position[1] < minY) minY = s.position[1]
+    if (s.position[1] > maxY) maxY = s.position[1]
+  }
+  const side = Math.max(2, Math.round(Math.sqrt(samples.length)))
+  const spanX = maxX - minX
+  const spanY = maxY - minY
+  const hw = spanX > 1e-3 ? Math.max(0.14, Math.min(0.58, (spanX / (side - 1)) * 0.44)) : 0.25
+  const hh = spanY > 1e-3 ? Math.max(0.14, Math.min(0.58, (spanY / (side - 1)) * 0.44)) : 0.25
+  return [hw, hh]
 }
