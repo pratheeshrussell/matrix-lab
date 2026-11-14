@@ -553,4 +553,76 @@ onBeforeUnmount(() => {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
 }
+
+@media (max-width: 768px) {
+  .top-toolbar {
+    padding: 0.38rem 0.6rem;
+    gap: 0.35rem;
+  }
+
+  .toolbar-primary-row {
+    gap: 0.35rem 0.5rem;
+  }
+
+  .toolbar-primary-left {
+    gap: 0.45rem;
+    max-width: 100%;
+  }
+
+  .brand-logo {
+    width: 1.7rem;
+    height: 1.7rem;
+    font-size: 0.76rem;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .mode-switcher {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mode-switcher::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mode-btn {
+    padding: 0.26rem 0.5rem;
+    font-size: 0.72rem;
+  }
+
+  .select-input {
+    max-width: 145px;
+    font-size: 0.71rem;
+  }
+
+  .share-btn {
+    padding: 0 0.5rem;
+    font-size: 0.71rem;
+  }
+
+  .toolbar-overlays-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-top: 0.32rem;
+  }
+
+  .toolbar-overlays-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .toggle-group {
+    flex-wrap: nowrap;
+  }
+
+  .chip-toggle {
+    flex-shrink: 0;
+  }
+}
 </style>

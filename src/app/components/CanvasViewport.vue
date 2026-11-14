@@ -16,6 +16,7 @@ const boardContainerRef = ref<HTMLElement | null>(null)
 const renderer = new JSXGraphRenderer()
 const flowEngine = new ParticleFlowEngine()
 const showExperimentBanner = ref(true)
+const showMobileLegend = ref(false)
 const isPlayingMorph = ref(false)
 const isFlowPlaying = ref(false)
 const isSeedMode = ref(false)
@@ -475,7 +476,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="hud-bottom-row">
-          <div class="canvas-legend">
+          <div class="canvas-legend" :class="{ 'mobile-visible': showMobileLegend }">
             <div class="legend-item">
               <span class="legend-line dashed" />
               <span>Original (<KatexMath tex="\mathbf{x}" />)</span>
@@ -542,6 +543,15 @@ onBeforeUnmount(() => {
               @click="sceneStore.clearScene()"
             >
               Clear All
+            </button>
+            <button
+              type="button"
+              class="ctrl-btn reset-btn mobile-legend-btn"
+              :class="{ active: showMobileLegend }"
+              title="Toggle canvas legend"
+              @click="showMobileLegend = !showMobileLegend"
+            >
+              Legend
             </button>
             <button
               v-if="!showExperimentBanner"
@@ -984,5 +994,63 @@ onBeforeUnmount(() => {
 
 .legend-dot.e2 {
   background: #22c55e;
+}
+
+.mobile-legend-btn {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .drag-hint {
+    display: none;
+  }
+
+  .morph-bar {
+    padding: 0.3rem 0.55rem;
+    gap: 0.35rem 0.5rem;
+  }
+
+  .morph-play-btn,
+  .flow-play-btn,
+  .seed-mode-btn {
+    padding: 0.22rem 0.5rem;
+    font-size: 0.71rem;
+  }
+
+  .experiment-banner {
+    top: 0.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .exp-content p {
+    display: none;
+  }
+
+  .board-bottom-hud {
+    bottom: 0.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+  }
+
+  .mobile-legend-btn {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .mobile-legend-btn.active {
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    background: rgba(56, 189, 248, 0.14);
+  }
+
+  .canvas-legend {
+    display: none;
+  }
+
+  .canvas-legend.mobile-visible {
+    display: flex;
+  }
 }
 </style>
